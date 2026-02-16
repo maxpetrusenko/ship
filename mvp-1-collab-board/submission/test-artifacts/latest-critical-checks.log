@@ -1,0 +1,8 @@
+[2026-02-16T22:08:43Z] Creating 5 temporary QA users
+[2026-02-16T22:08:47Z] Running simultaneous AI commands from two users
+[2026-02-16T22:08:49Z] Simultaneous run complete in 2311ms (statuses: success, success)
+[2026-02-16T22:08:49Z] Running 5-user concurrent AI command burst
+[2026-02-16T22:08:52Z] Validating idempotency with duplicate clientCommandId
+[2026-02-16T22:08:52Z] Running throttled/disconnect retry simulation
+[2026-02-16T22:08:55Z] Querying Firestore aiCommands for queue evidence
+[2026-02-16T22:08:55Z] Done. Summary: /Users/maxpetrusenko/Desktop/Gauntlet Cohort/mvp-1-collab-board/submission/test-artifacts/critical-checks-1771279723.json

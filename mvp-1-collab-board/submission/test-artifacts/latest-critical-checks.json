@@ -1,0 +1,92 @@
+{
+  "timestamp": 1771279723,
+  "boardId": "qa-critical-1771279723",
+  "checks": {
+    "simultaneousAiCommands": {
+      "pass": true,
+      "statuses": [
+        "success",
+        "success"
+      ],
+      "elapsedMs": 2311
+    },
+    "fiveAuthUsersBurst": {
+      "pass": true,
+      "statuses": [
+        "success",
+        "success",
+        "success",
+        "success",
+        "success"
+      ]
+    },
+    "idempotency": {
+      "pass": true,
+      "duplicateResponseIdempotent": true
+    },
+    "throttleDisconnectRetry": {
+      "pass": true,
+      "firstRequestCurlExit": 28,
+      "retryStatus": "success",
+      "retryIdempotent": false
+    }
+  },
+  "queueEvidence": [
+    {
+      "name": "cmd-b-1771279723",
+      "status": "success",
+      "queueSequence": 1,
+      "startedAt": 1771279728523,
+      "completedAt": 1771279728694
+    },
+    {
+      "name": "cmd-a-1771279723",
+      "status": "success",
+      "queueSequence": 2,
+      "startedAt": 1771279729539,
+      "completedAt": 1771279729739
+    },
+    {
+      "name": "cmd-burst-1771279723-3",
+      "status": "success",
+      "queueSequence": 3,
+      "startedAt": 1771279730670,
+      "completedAt": 1771279730769
+    },
+    {
+      "name": "cmd-burst-1771279723-5",
+      "status": "success",
+      "queueSequence": 4,
+      "startedAt": 1771279730933,
+      "completedAt": 1771279731065
+    },
+    {
+      "name": "cmd-burst-1771279723-1",
+      "status": "success",
+      "queueSequence": 5,
+      "startedAt": 1771279731517,
+      "completedAt": 1771279731615
+    },
+    {
+      "name": "cmd-burst-1771279723-2",
+      "status": "success",
+      "queueSequence": 6,
+      "startedAt": 1771279731931,
+      "completedAt": 1771279732033
+    },
+    {
+      "name": "cmd-burst-1771279723-4",
+      "status": "success",
+      "queueSequence": 7,
+      "startedAt": 1771279732324,
+      "completedAt": 1771279732446
+    },
+    {
+      "name": "cmd-throttle-1771279723",
+      "status": "success",
+      "queueSequence": 8,
+      "startedAt": 1771279734950,
+      "completedAt": 1771279735329
+    }
+  ]
+}
