@@ -1,57 +1,81 @@
-# Gauntle cohort G4
-```sunsay midnight is project deadline ```
-* Government companies will be hiring. so we need to a part of the context
-* We have gemini pro, nano banana pro, all google models with our email max.petrusenko@gfachallenger.gauntletai.com
-* tech stack might be different for a different project ( Typescript, Python, Go, Rails we should know why its better used than the other )
+# Gauntlet Cohort G4: Operating Guide
 
-the project we will be building?
-https://gauntlet-portal.web.app/login
-max.petrusenko@gfachallenger.gauntletai.com
+## Mission
+Ship a real-time collaborative whiteboard with an AI board agent for the G4 sprint.
+Project completion is required for Austin admission.
 
-Project i might want to do: ( its might be different than client's project. look further )
-AI avatar  + ai images + late.dev + scheduling + latest news search + open claw ( should ahve access to create boards,)
+## Official Deadline and Checkpoints
+- Final deadline: Sunday, February 22, 2026 at 10:59 PM CT.
+- Pre-Search checkpoint: Monday (first hour).
+- MVP checkpoint: Tuesday (24 hours).
+- Early submission checkpoint: Friday (day 4).
 
-Critical:
-- thinking claude, speed cursor, + clarity codex to review
-- if we change desicions. why did we change desicions ( we will have all the context, we will need to defent those desicions. so keep a file DESIONS.md, we should have smth impressive )
-- we're making system decisions
-- critical peace of thinking
-- e2e ttd ( end to end test driven development, don't use for front end )
-- front end ( cursor agent use tests and review them, dont rewrite tests to pass them, use cursor (60$) and 100$ cc)
-- does code scale, does code perform well?
-- session folder contain our transcripts from live sessions ( and also screenshots)
-- If we build UI we should be components and types ( if react use 17 or newer version)
-- we should use indexing on cursor docs
+## Portal and Team Access
+- Project portal: https://gauntlet-portal.web.app/login
+- Team email: `max.petrusenko@gfachallenger.gauntletai.com`
+- Available models: Gemini Pro, Nano Banana Pro, and other Google models on team account.
 
-Tell Lera:
-- Zack generated preseach doc and asked questions about it ( do presearch doc and throw it in different ai's to get all responses from multiple directions )
-- why we choose certain stack and why?
-- where we will host? ( what is main focus now should be( it might change later) system design -> store data, security, file structure, legacy code, naming, testing, refactoring, improve it )
-- use google deep research functionality for research, if not use perplexity
-- review if we covered everything and ak me questions if we have everything is set 
-- Time to ship? requirements? scaling and load profiles? budget? time to ship? team? authentication?
-- we will use presearch doc ( $60 save it to drive and save as pdf ), then prd and stack
-cc - use init then put in tasks
+## Core Principles
+- Think with Claude, move fast with Cursor, verify and review with Codex.
+- Every major system decision must be defended in writing.
+- If a decision changes, log why it changed and what tradeoff caused it.
+- Optimize for scale, performance, and maintainability from day one.
+- Keep transcripts and screenshots in `Sessions/` for auditability.
+- Use typed, componentized UI patterns (React 17+ if React is chosen).
+- Use indexing/docs tooling in Cursor.
 
+## Required Repository Files
+- `PRESEARCH.md`: architecture and stack tradeoff research.
+- `PRD.md`: product requirements and user-facing scope.
+- `MVP.md`: hard-gate MVP checklist and acceptance criteria.
+- `DECISIONS.md`: decision log with date, choice, alternatives, rationale, and impact.
+- `TASKS.md`: 1-hour deliverables with owners and deadlines.
+- `Sessions/`: session transcripts and screenshots.
 
+## Engineering Requirements
+- Build tests for every new feature.
+- Use end-to-end TDD mindset for collaboration flows (do not force this on front-end styling work).
+- Do not rewrite tests just to make them pass.
+- Track work in Linear tickets.
+- Revisit docs when scope changes to prevent duplication and drift.
+- Track maintenance cost as part of technical decisions.
 
-Docs & Tests:
-- skip if done -> generate PRD and MVP for the doc we received (requirements.md ) as you reviwing docs as me questions so i can make sure you understand it too 
-- walk throught the documentation every time if smth got updated. ( PRD, MVP, Patterns, duplcation)
-- use www.Skills.sh url we can download progressively ( project level skill + symlink)
-- we must build TESTS for every new feature we build ( examples: https://github.com/steipete/CodexBar/tree/main/Tests, e2e ttd is what guys like jeffrey emanuel and steve yegge  )
-- we should use Linear to follow our tickes
-- maintenance cost?
+## Build Order (Execution Priority)
+1. Multiplayer cursor sync.
+2. Object sync for sticky notes and shapes.
+3. Conflict handling for simultaneous edits.
+4. Persistence across refresh/reconnect.
+5. Board operations and transforms.
+6. AI commands (single-step).
+7. AI commands (multi-step templates).
 
+## Research and Review Workflow
+1. Complete Pre-Search first and challenge it with multiple AI systems.
+2. Confirm stack choice with explicit reasons.
+3. Confirm hosting with security, data, and scale implications.
+4. Validate naming, file structure, refactorability, and legacy tolerance.
+5. Re-check requirements coverage before each milestone.
 
-AI will go through our project to rate it
+## Questions to Answer Early
+- Time to ship and non-negotiable deadlines?
+- Scale and load profile at launch and 6 months?
+- Budget and monthly cost ceiling?
+- Team size and execution capacity?
+- Authentication model and access control?
+- Compliance scope (if targeting enterprise/government)?
 
-Tasks ( should have Tasks.md )
-1. can i download all transcript and save it from google to gauntle notion page as curriculum
-2. 1 hour deliverables. hard deadlines
-3. good resource for system design? ( search top rate and most forked repos, we look at META, OPenAI, Claude,  )
-4. IP if we select hiring parner
-5. If using cursor rules and skills
-6. give this to open claw
-7. remind to use aqua and whisper for talking to ai instead of writing
+## Notes for Lera
+- Zack generated a Pre-Search doc and asked key architecture questions.
+- Run Pre-Search through multiple AI perspectives before finalizing.
+- Use Google Deep Research first, Perplexity as backup.
+- Save research package to Drive and PDF before PRD/stack lock.
+- Review open questions with the team before implementation lock.
 
+## Active Task Backlog (Mirror in `TASKS.md`)
+1. Download transcripts and publish curriculum to Gauntlet Notion.
+2. Run 1-hour deliverables cadence with hard deadlines.
+3. Collect high-signal system design resources (Meta/OpenAI/Anthropic and top forked repos).
+4. Clarify IP posture if selecting a hiring partner.
+5. Define Cursor rules and skills usage for the project.
+6. Ensure OpenClaw can read the repo and create boards.
+7. Prefer Aqua + Whisper voice flow when practical.
