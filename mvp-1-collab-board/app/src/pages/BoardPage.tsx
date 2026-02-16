@@ -42,6 +42,8 @@ export const BoardPage = () => {
   const objectsRef = useRef<BoardObject[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [clipboardObject, setClipboardObject] = useState<BoardObject | null>(null)
+  const [draggingObjectId, setDraggingObjectId] = useState<string | null>(null)
+  const [localObjectPositions, setlocalObjectPositions] = useState<Record<string, Point>>({})
 
   const [cursors, setCursors] = useState<Record<string, CursorPresence>>({})
 
@@ -88,11 +90,22 @@ export const BoardPage = () => {
 
       nextObjects.sort((left, right) => left.zIndex - right.zIndex)
       objectsRef.current = nextObjects
-      setObjects(nextObjects)
+
+      // Don't update objects state if we're currently dragging one of them
+      setObjects((prevObjects) => {
+        if (draggingObjectId) {
+          return nextObjects.map((obj) =>
+            obj.id === draggingObjectId
+              ? prevObjects.find((o) => o.id === draggingObjectId) || obj
+              : obj
+          )
+        }
+        return nextObjects
+      })
     })
 
     return unsubscribe
-  }, [boardId])
+  }, [boardId, draggingObjectId])
 
   useEffect(() => {
     if (!rtdb) return
@@ -449,10 +462,19 @@ export const BoardPage = () => {
             scaleY={viewport.scale}
             draggable
             onDragEnd={(event) => {
+              if (event.target !== event.currentTarget) {
+                return
+              }
+
+              const stage = stageRef.current
+              if (!stage) {
+                return
+              }
+
               setViewport((prev) => ({
                 ...prev,
-                x: event.target.x(),
-                y: event.target.y(),
+                x: stage.x(),
+                y: stage.y(),
               }))
             }}
             onWheel={(event) => {
@@ -510,13 +532,15 @@ export const BoardPage = () => {
             <Layer>
               {objects.map((boardObject) => {
                 const selected = boardObject.id === selectedId
+                // Use local position during drag, server position otherwise
+                const position = localObjectPositions[boardObject.id] || boardObject.position
 
                 if (boardObject.type === 'stickyNote') {
                   return (
                     <Group
                       key={boardObject.id}
-                      x={boardObject.position.x}
-                      y={boardObject.position.y}
+                      x={position.x}
+                      y={position.y}
                       draggable
                       onClick={() => setSelectedId(boardObject.id)}
                       onTap={() => setSelectedId(boardObject.id)}
@@ -526,13 +550,23 @@ export const BoardPage = () => {
                           void patchObject(boardObject.id, { text: nextText })
                         }
                       }}
+                      onDragStart={() => {
+                        setDraggingObjectId(boardObject.id)
+                      }}
                       onDragMove={(event) => {
-                        getDragPublisher(boardObject.id)({ x: event.target.x(), y: event.target.y() })
+                        const newPos = { x: event.target.x(), y: event.target.y() }
+                        setlocalObjectPositions((prev) => ({ ...prev, [boardObject.id]: newPos }))
+                        getDragPublisher(boardObject.id)(newPos)
                       }}
                       onDragEnd={(event) => {
-                        void patchObject(boardObject.id, {
-                          position: { x: event.target.x(), y: event.target.y() },
+                        const finalPos = { x: event.target.x(), y: event.target.y() }
+                        setlocalObjectPositions((prev) => {
+                          const next = { ...prev }
+                          delete next[boardObject.id]
+                          return next
                         })
+                        setDraggingObjectId(null)
+                        void patchObject(boardObject.id, { position: finalPos })
                       }}
                     >
                       <Rect
@@ -561,8 +595,8 @@ export const BoardPage = () => {
                 return (
                   <Rect
                     key={boardObject.id}
-                    x={boardObject.position.x}
-                    y={boardObject.position.y}
+                    x={position.x}
+                    y={position.y}
                     width={boardObject.size.width}
                     height={boardObject.size.height}
                     fill={boardObject.color}
@@ -572,13 +606,23 @@ export const BoardPage = () => {
                     cornerRadius={8}
                     onClick={() => setSelectedId(boardObject.id)}
                     onTap={() => setSelectedId(boardObject.id)}
+                    onDragStart={() => {
+                      setDraggingObjectId(boardObject.id)
+                    }}
                     onDragMove={(event) => {
-                      getDragPublisher(boardObject.id)({ x: event.target.x(), y: event.target.y() })
+                      const newPos = { x: event.target.x(), y: event.target.y() }
+                      setlocalObjectPositions((prev) => ({ ...prev, [boardObject.id]: newPos }))
+                      getDragPublisher(boardObject.id)(newPos)
                     }}
                     onDragEnd={(event) => {
-                      void patchObject(boardObject.id, {
-                        position: { x: event.target.x(), y: event.target.y() },
+                      const finalPos = { x: event.target.x(), y: event.target.y() }
+                      setlocalObjectPositions((prev) => {
+                        const next = { ...prev }
+                        delete next[boardObject.id]
+                        return next
                       })
+                      setDraggingObjectId(null)
+                      void patchObject(boardObject.id, { position: finalPos })
                     }}
                   />
                 )

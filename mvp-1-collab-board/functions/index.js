@@ -395,16 +395,46 @@ const runCommandPlan = async (ctx, command) => {
   throw new Error('Unsupported command. Try sticky note, rectangle, grid, SWOT, retrospective, or journey map commands.')
 }
 
-const acquireBoardLock = async (boardId, commandId) => {
+const reserveQueueSequence = async (boardId) => {
   const lockRef = getSystemRef(boardId)
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const sequence = await db.runTransaction(async (tx) => {
+    const lockSnap = await tx.get(lockRef)
+    const lockData = lockSnap.exists ? lockSnap.data() : null
+    const nextSequence = parseNumber(lockData?.nextSequence, 1)
+    const processingSequence = parseNumber(lockData?.processingSequence, 1)
+
+    tx.set(
+      lockRef,
+      {
+        nextSequence: nextSequence + 1,
+        processingSequence,
+        updatedAt: nowMs(),
+      },
+      { merge: true },
+    )
+
+    return nextSequence
+  })
+
+  return sequence
+}
+
+const acquireBoardLock = async (boardId, commandId, queueSequence) => {
+  const lockRef = getSystemRef(boardId)
+
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     const acquired = await db.runTransaction(async (tx) => {
       const now = nowMs()
       const lockSnap = await tx.get(lockRef)
       const lockData = lockSnap.exists ? lockSnap.data() : null
       const activeCommandId = lockData?.activeCommandId || null
       const expiresAt = lockData?.expiresAt || 0
+      const processingSequence = parseNumber(lockData?.processingSequence, 1)
+
+      if (processingSequence !== queueSequence) {
+        return false
+      }
 
       if (activeCommandId && expiresAt > now && activeCommandId !== commandId) {
         return false
@@ -430,10 +460,10 @@ const acquireBoardLock = async (boardId, commandId) => {
     await sleep(150)
   }
 
-  throw new Error('AI command queue is busy. Retry in a moment.')
+  throw new Error('AI command queue timeout. Retry in a moment.')
 }
 
-const releaseBoardLock = async (boardId, commandId) => {
+const releaseBoardLock = async (boardId, commandId, queueSequence = null) => {
   const lockRef = getSystemRef(boardId)
 
   await db.runTransaction(async (tx) => {
@@ -443,11 +473,16 @@ const releaseBoardLock = async (boardId, commandId) => {
     const lockData = lockSnap.data()
     if (lockData?.activeCommandId !== commandId) return
 
+    const processingSequence = parseNumber(lockData?.processingSequence, 1)
+    const nextProcessingSequence =
+      queueSequence === null ? processingSequence : Math.max(processingSequence, queueSequence + 1)
+
     tx.set(
       lockRef,
       {
         activeCommandId: null,
         expiresAt: 0,
+        processingSequence: nextProcessingSequence,
         updatedAt: nowMs(),
       },
       { merge: true },
@@ -473,6 +508,10 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
     return
   }
 
+  let boardIdForError = ''
+  let clientCommandIdForError = ''
+  let queueSequenceForError = null
+
   try {
     const authHeader = String(req.headers.authorization || '')
     if (!authHeader.startsWith('Bearer ')) {
@@ -488,6 +527,8 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
     const userDisplayName = String(req.body?.userDisplayName || decodedToken.name || '').trim()
     const command = sanitizeText(req.body?.command)
     const clientCommandId = String(req.body?.clientCommandId || crypto.randomUUID()).trim()
+    boardIdForError = boardId
+    clientCommandIdForError = clientCommandId
 
     if (!boardId || !command) {
       res.status(400).json({ error: 'boardId and command are required' })
@@ -496,8 +537,9 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
 
     const commandRef = getCommandsRef(boardId).doc(clientCommandId)
     const existing = await commandRef.get()
+    const existingData = existing.exists ? existing.data() || {} : {}
+
     if (existing.exists) {
-      const existingData = existing.data() || {}
       if (existingData.status === 'success') {
         res.status(200).json({
           status: 'success',
@@ -507,7 +549,22 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
         })
         return
       }
+
+      if (existingData.status === 'running' || existingData.status === 'queued') {
+        res.status(202).json({
+          status: existingData.status,
+          commandId: clientCommandId,
+          queueSequence: existingData.queueSequence || null,
+        })
+        return
+      }
     }
+
+    let queueSequence = parseNumber(existingData.queueSequence, 0)
+    if (!queueSequence) {
+      queueSequence = await reserveQueueSequence(boardId)
+    }
+    queueSequenceForError = queueSequence
 
     await commandRef.set(
       {
@@ -515,13 +572,22 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
         command,
         userId,
         userDisplayName,
+        status: 'queued',
+        queueSequence,
+        queuedAt: nowMs(),
+      },
+      { merge: true },
+    )
+
+    await acquireBoardLock(boardId, clientCommandId, queueSequence)
+
+    await commandRef.set(
+      {
         status: 'running',
         startedAt: nowMs(),
       },
       { merge: true },
     )
-
-    await acquireBoardLock(boardId, clientCommandId)
 
     const state = await getBoardState(boardId)
     const context = {
@@ -548,17 +614,15 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
       { merge: true },
     )
 
-    await releaseBoardLock(boardId, clientCommandId)
+    await releaseBoardLock(boardId, clientCommandId, queueSequence)
 
     res.status(200).json({ status: 'success', commandId: clientCommandId, result })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
     try {
-      const boardId = String(req.body?.boardId || '').trim()
-      const clientCommandId = String(req.body?.clientCommandId || '').trim()
-      if (boardId && clientCommandId) {
-        await getCommandsRef(boardId).doc(clientCommandId).set(
+      if (boardIdForError && clientCommandIdForError) {
+        await getCommandsRef(boardIdForError).doc(clientCommandIdForError).set(
           {
             status: 'error',
             completedAt: nowMs(),
@@ -566,7 +630,7 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
           },
           { merge: true },
         )
-        await releaseBoardLock(boardId, clientCommandId)
+        await releaseBoardLock(boardIdForError, clientCommandIdForError, queueSequenceForError)
       }
     } catch (innerError) {
       console.error('Failed to store AI command error', innerError)

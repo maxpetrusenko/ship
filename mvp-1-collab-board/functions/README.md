@@ -9,7 +9,7 @@ Provided by Firebase function export:
 ## What it does
 - Accepts AI command requests with Firebase bearer auth + `boardId`, `command`, `clientCommandId`.
 - Stores command status in `boards/{boardId}/aiCommands/{clientCommandId}`.
-- Applies per-board lock for serialized command execution.
+- Applies per-board FIFO sequencing + lock for deterministic command execution.
 - Enforces idempotency via `clientCommandId`.
 - Executes dispatcher tools:
   - `createStickyNote`
