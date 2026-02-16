@@ -520,7 +520,14 @@ exports.api = onRequest({ timeoutSeconds: 120, cors: true }, async (req, res) =>
     }
 
     const idToken = authHeader.slice('Bearer '.length).trim()
-    const decodedToken = await admin.auth().verifyIdToken(idToken)
+    let decodedToken
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken)
+    } catch (verifyError) {
+      console.warn('Bearer token verification failed', verifyError)
+      res.status(401).json({ error: 'Invalid or expired bearer token' })
+      return
+    }
 
     const boardId = String(req.body?.boardId || '').trim()
     const userId = decodedToken.uid
