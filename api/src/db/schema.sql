@@ -2,6 +2,8 @@
 -- Everything is a Document - Unified Model
 -- Multi-Workspace Architecture
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- Workspaces
 CREATE TABLE IF NOT EXISTS workspaces (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -356,6 +358,12 @@ CREATE INDEX IF NOT EXISTS idx_documents_parent_id ON documents(parent_id);
 CREATE INDEX IF NOT EXISTS idx_documents_document_type ON documents(document_type);
 CREATE INDEX IF NOT EXISTS idx_documents_properties ON documents USING GIN (properties);
 CREATE INDEX IF NOT EXISTS idx_documents_person_user_id ON documents ((properties->>'user_id')) WHERE document_type = 'person';
+CREATE INDEX IF NOT EXISTS idx_documents_person_title_search
+  ON documents USING GIN (LOWER(title) gin_trgm_ops)
+  WHERE document_type = 'person' AND archived_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_title_search
+  ON documents USING GIN (LOWER(title) gin_trgm_ops)
+  WHERE document_type IN ('wiki', 'issue', 'project', 'program') AND deleted_at IS NULL;
 
 -- Document visibility indexes
 CREATE INDEX IF NOT EXISTS idx_documents_visibility ON documents(visibility);

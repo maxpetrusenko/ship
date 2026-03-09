@@ -37,7 +37,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
       return (
         <div className="flex flex-1 items-center justify-center p-8">
-          <div className="flex flex-col items-center gap-4 text-center">
+          <div role="alert" aria-live="assertive" className="flex flex-col items-center gap-4 text-center">
             <div className="text-sm font-medium text-foreground">Something went wrong</div>
             <p className="max-w-md text-xs text-muted">
               An unexpected error occurred while rendering this section.

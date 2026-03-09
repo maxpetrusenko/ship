@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Editor } from '@/components/Editor';
 import { PropertiesPanel } from '@/components/sidebars/PropertiesPanel';
 import { WeeklyReviewSubNav } from '@/components/review/WeeklyReviewSubNav';
 import { useWeeklyReviewActions } from '@/hooks/useWeeklyReviewActions';
@@ -19,6 +18,11 @@ import { PlanQualityBanner, RetroQualityBanner } from '@/components/PlanQualityB
 import { useAutoSave } from '@/hooks/useAutoSave';
 import type { Person } from '@/components/PersonCombobox';
 import type { BelongsTo } from '@ship/shared';
+
+const LazyEditor = lazy(async () => {
+  const module = await import('@/components/Editor');
+  return { default: module.Editor };
+});
 
 export type DocumentType = 'wiki' | 'issue' | 'project' | 'sprint' | 'program' | 'person' | 'weekly_plan' | 'weekly_retro';
 
@@ -437,30 +441,38 @@ export function UnifiedEditor({
   }, [weeklyReviewState]);
 
   return (
-    <Editor
-      documentId={document.id}
-      userName={user.name}
-      initialTitle={document.title}
-      onTitleChange={isTitleReadOnly ? undefined : throttledTitleSave}
-      titleReadOnly={isTitleReadOnly}
-      onBack={onBack}
-      backLabel={backLabel}
-      onDelete={onDelete}
-      roomPrefix={effectiveRoomPrefix}
-      placeholder={effectivePlaceholder}
-      onCreateSubDocument={onCreateSubDocument}
-      onNavigateToDocument={handleNavigateToDocument}
-      onDocumentConverted={onDocumentConverted}
-      headerBadge={headerBadge}
-      secondaryHeader={secondaryHeader}
-      sidebar={sidebar}
-      documentType={document.document_type}
-      onPlanChange={document.document_type === 'sprint' || document.document_type === 'project' ? handlePlanChange : undefined}
-      contentBanner={qualityBanner}
-      onContentChange={isWeeklyDoc ? setEditorContent : undefined}
-      aiScoringAnalysis={isWeeklyDoc ? aiScoringAnalysis : undefined}
-      titleSuffix={titleSuffix}
-    />
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center">
+          <div className="text-muted">Loading editor...</div>
+        </div>
+      }
+    >
+      <LazyEditor
+        documentId={document.id}
+        userName={user.name}
+        initialTitle={document.title}
+        onTitleChange={isTitleReadOnly ? undefined : throttledTitleSave}
+        titleReadOnly={isTitleReadOnly}
+        onBack={onBack}
+        backLabel={backLabel}
+        onDelete={onDelete}
+        roomPrefix={effectiveRoomPrefix}
+        placeholder={effectivePlaceholder}
+        onCreateSubDocument={onCreateSubDocument}
+        onNavigateToDocument={handleNavigateToDocument}
+        onDocumentConverted={onDocumentConverted}
+        headerBadge={headerBadge}
+        secondaryHeader={secondaryHeader}
+        sidebar={sidebar}
+        documentType={document.document_type}
+        onPlanChange={document.document_type === 'sprint' || document.document_type === 'project' ? handlePlanChange : undefined}
+        contentBanner={qualityBanner}
+        onContentChange={isWeeklyDoc ? setEditorContent : undefined}
+        aiScoringAnalysis={isWeeklyDoc ? aiScoringAnalysis : undefined}
+        titleSuffix={titleSuffix}
+      />
+    </Suspense>
   );
 }
 

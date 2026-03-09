@@ -34,6 +34,7 @@ export function LoginPage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [caiaAvailable, setCaiaAvailable] = useState(false);
   const [isCaiaLoading, setIsCaiaLoading] = useState(false);
+  const currentErrorId = errorField ? `login-${errorField}-error` : 'login-general-error';
 
   // Subscribe to online/offline status changes using native browser events
   useEffect(() => {
@@ -171,14 +172,14 @@ export function LoginPage() {
 
   if (isCheckingSetup) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <main className="flex min-h-screen items-center justify-center bg-background" aria-label="Login loading">
         <div className="text-muted">Loading...</div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-[360px]">
         {/* Logo / Brand */}
         <div className="mb-8 text-center">
@@ -197,6 +198,7 @@ export function LoginPage() {
           {!isOnline && (
             <div
               role="alert"
+              aria-live="assertive"
               className="rounded-md border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-400"
             >
               You're currently offline. Please connect to the internet to sign in.
@@ -207,6 +209,7 @@ export function LoginPage() {
           {sessionExpired && (
             <div
               role="alert"
+              aria-live="assertive"
               className="rounded-md border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-400"
             >
               Your session expired due to inactivity. Please log in again.
@@ -216,8 +219,9 @@ export function LoginPage() {
           {/* Error from URL (OAuth callback failures) */}
           {urlError && !error && (
             <div
-              id="login-error"
+              id="login-general-error"
               role="alert"
+              aria-live="assertive"
               className="rounded-md border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
             >
               {urlError}
@@ -227,8 +231,9 @@ export function LoginPage() {
           {/* Error from form submission */}
           {error && (
             <div
-              id="login-error"
+              id={currentErrorId}
               role="alert"
+              aria-live="assertive"
               className="rounded-md border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
             >
               {error}
@@ -250,7 +255,7 @@ export function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email address"
               aria-invalid={errorField === 'email' ? 'true' : undefined}
-              aria-describedby={errorField === 'email' ? 'login-error' : undefined}
+              aria-describedby={errorField === 'email' ? 'login-email-error' : errorField === 'general' ? 'login-general-error' : undefined}
               className={cn(
                 'w-full rounded-md border border-border bg-background px-4 py-2.5',
                 'text-sm text-foreground placeholder:text-muted',
@@ -273,7 +278,7 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               aria-invalid={errorField === 'password' ? 'true' : undefined}
-              aria-describedby={errorField === 'password' ? 'login-error' : undefined}
+              aria-describedby={errorField === 'password' ? 'login-password-error' : errorField === 'general' ? 'login-general-error' : undefined}
               className={cn(
                 'w-full rounded-md border border-border bg-background px-4 py-2.5',
                 'text-sm text-foreground placeholder:text-muted',
@@ -367,6 +372,6 @@ export function LoginPage() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

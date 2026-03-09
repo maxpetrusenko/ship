@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
 import { useToast } from '@/components/ui/Toast';
+import { BlockingLoadError } from '@/components/ui/BlockingLoadError';
 import { useAuth } from '@/hooks/useAuth';
 import { useInvalidateStandupStatus } from '@/hooks/useStandupStatusQuery';
 import { apiPost, apiPatch, apiDelete, apiGet } from '@/lib/api';
@@ -27,6 +28,7 @@ interface StandupFeedProps {
 export function StandupFeed({ sprintId }: StandupFeedProps) {
   const [standups, setStandups] = useState<Standup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -69,16 +71,20 @@ export function StandupFeed({ sprintId }: StandupFeedProps) {
   });
 
   const fetchStandups = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const res = await apiGet(`/api/weeks/${sprintId}/standups`);
       if (res.ok) {
         const data = await res.json();
         setStandups(data);
       } else {
+        setLoadError('Unable to load standup updates right now. Retry before assuming the feed is empty.');
         showToast('Failed to load standups', 'error');
       }
     } catch (err) {
       console.error('Failed to fetch standups:', err);
+      setLoadError('Unable to load standup updates right now. Retry before assuming the feed is empty.');
       showToast('Failed to load standups. Please try again.', 'error');
     } finally {
       setLoading(false);
@@ -180,6 +186,16 @@ export function StandupFeed({ sprintId }: StandupFeedProps) {
       <div className="flex h-64 items-center justify-center">
         <div className="text-muted">Loading standups...</div>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <BlockingLoadError
+        title="Unable to load standups"
+        message={loadError}
+        onRetry={() => { void fetchStandups(); }}
+      />
     );
   }
 

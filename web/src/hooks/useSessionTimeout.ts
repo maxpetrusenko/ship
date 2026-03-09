@@ -15,7 +15,7 @@ export interface SessionTimeoutState {
   showWarning: boolean;
   timeRemaining: number | null;
   warningType: WarningType | null;
-  resetTimer: () => void;
+  resetTimer: () => Promise<void>;
   lastActivity: number;
 }
 
@@ -50,6 +50,8 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
 
   // Fetch session info on mount
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchSessionInfo() {
       try {
         const response = await fetch('/api/auth/session', {
@@ -57,7 +59,7 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
         });
         if (response.ok) {
           const data = await response.json();
-          if (data.success && data.data) {
+          if (!cancelled && data.success && data.data) {
             const info: SessionInfo = data.data;
             setSessionCreatedAt(new Date(info.createdAt).getTime());
           }
@@ -66,7 +68,12 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
         // Ignore errors - absolute timeout tracking won't work but inactivity still will
       }
     }
+
     fetchSessionInfo();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Clear all timers helper
@@ -94,6 +101,26 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
     }
     extendingSessionRef.current = true;
 
+    // Call extend-session API to extend server-side session
+    try {
+      const response = await apiPost('/api/auth/extend-session');
+      if (response.status === 401 || response.status === 403) {
+        console.error('Failed to extend session - forcing logout');
+        onTimeoutRef.current();
+        return;
+      }
+
+      if (!response.ok) {
+        console.warn('Failed to extend session - keeping warning visible');
+        return;
+      }
+    } catch {
+      console.warn('Network error extending session - keeping warning visible');
+      return;
+    } finally {
+      extendingSessionRef.current = false;
+    }
+
     const now = Date.now();
     setLastActivity(now);
     lastActivityRef.current = now;
@@ -103,22 +130,6 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
     clearAllTimers();
     // Schedule the next inactivity warning
     scheduleInactivityWarningRef.current();
-
-    // Call extend-session API to extend server-side session
-    try {
-      const response = await apiPost('/api/auth/extend-session');
-      if (!response.ok) {
-        // API call failed - force logout
-        console.error('Failed to extend session - forcing logout');
-        onTimeoutRef.current();
-      }
-    } catch {
-      // Network error - force logout
-      console.error('Network error extending session - forcing logout');
-      onTimeoutRef.current();
-    } finally {
-      extendingSessionRef.current = false;
-    }
   }, [clearAllTimers]);
 
   // Schedule inactivity warning

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DetailsExtension } from './DetailsExtension';
+import { DetailsContent, DetailsExtension, DetailsSummary } from './DetailsExtension';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 
@@ -13,7 +13,7 @@ describe('DetailsExtension', () => {
   it('should be configured as a block node with content', () => {
     const extension = DetailsExtension;
     expect(extension.config.group).toBe('block');
-    expect(extension.config.content).toBe('block+');
+    expect(extension.config.content).toBe('detailsSummary detailsContent');
     expect(extension.config.defining).toBe(true);
   });
 
@@ -55,7 +55,7 @@ describe('DetailsExtension', () => {
 
   it('should work in editor context', () => {
     const editor = new Editor({
-      extensions: [StarterKit, DetailsExtension],
+      extensions: [StarterKit, DetailsExtension, DetailsSummary, DetailsContent],
       content: '<p>Test content</p>',
     });
 
@@ -65,15 +65,31 @@ describe('DetailsExtension', () => {
     editor.destroy();
   });
 
+  // Guards collapsible details blocks from losing their child-node contract in the editor schema.
   it('should allow inserting details via command', () => {
     const editor = new Editor({
-      extensions: [StarterKit, DetailsExtension],
+      extensions: [StarterKit, DetailsExtension, DetailsSummary, DetailsContent],
       content: '<p>Test content</p>',
     });
 
     // Check that the command exists
-    expect((editor.commands as any).setDetails).toBeDefined();
-    expect(typeof (editor.commands as any).setDetails).toBe('function');
+    expect(editor.commands.setDetails).toBeDefined();
+    expect(typeof editor.commands.setDetails).toBe('function');
+
+    editor.destroy();
+  });
+
+  // Guards generated details blocks from degrading into invalid anonymous children.
+  it('inserts summary and content nodes when setDetails runs', () => {
+    const editor = new Editor({
+      extensions: [StarterKit, DetailsExtension, DetailsSummary, DetailsContent],
+      content: '<p>Test content</p>',
+    });
+
+    expect(editor.commands.setDetails()).toBe(true);
+
+    const insertedDetails = editor.getJSON().content?.find(node => node.type === 'details');
+    expect(insertedDetails?.content?.map(node => node.type)).toEqual(['detailsSummary', 'detailsContent']);
 
     editor.destroy();
   });

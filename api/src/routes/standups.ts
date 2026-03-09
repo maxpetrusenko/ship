@@ -8,6 +8,8 @@ import { authMiddleware } from '../middleware/auth.js';
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
+type SqlValue = string | number | boolean | string[] | null;
+
 // Schema for creating a standalone standup
 const createStandupSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
@@ -379,7 +381,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     // Build update query
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: SqlValue[] = [];
     let paramIndex = 1;
 
     if (content !== undefined) {

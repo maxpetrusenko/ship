@@ -10,6 +10,26 @@ import * as Y from 'yjs';
 // Mark types that should be converted from wrapper elements to text marks
 const MARK_TYPES = new Set(['bold', 'italic', 'strike', 'underline', 'code', 'link']);
 
+type JsonAttributes = Record<string, unknown>;
+
+interface JsonMark {
+  type: string;
+  attrs?: JsonAttributes;
+}
+
+interface JsonNode {
+  type: string;
+  text?: string;
+  marks?: JsonMark[];
+  attrs?: JsonAttributes;
+  content?: JsonNode[];
+}
+
+interface JsonDoc {
+  type: 'doc';
+  content: JsonNode[];
+}
+
 /**
  * Check if an element is an inline mark (bold, italic, etc.) rather than a block element
  */
@@ -21,18 +41,18 @@ function isMarkElement(nodeName: string): boolean {
  * Extract text content and marks from a mark element (e.g., <bold>text</bold>)
  * Returns array of text nodes with marks applied
  */
-function extractTextWithMarks(element: Y.XmlElement, inheritedMarks: any[] = []): any[] {
+function extractTextWithMarks(element: Y.XmlElement, inheritedMarks: JsonMark[] = []): JsonNode[] {
   const nodeName = element.nodeName;
   const attrs = element.getAttributes();
 
   // Build mark for this element
-  const mark: any = { type: nodeName };
+  const mark: JsonMark = { type: nodeName };
   if (nodeName === 'link' && attrs.href) {
     mark.attrs = { href: attrs.href, target: attrs.target || '_blank' };
   }
 
   const currentMarks = [...inheritedMarks, mark];
-  const result: any[] = [];
+  const result: JsonNode[] = [];
 
   for (let i = 0; i < element.length; i++) {
     const child = element.get(i);
@@ -60,7 +80,7 @@ function extractTextWithMarks(element: Y.XmlElement, inheritedMarks: any[] = [])
  * This is used when reading documents that were edited via the collaborative editor
  */
 export function yjsToJson(fragment: Y.XmlFragment): any {
-  const content: any[] = [];
+  const content: JsonNode[] = [];
 
   for (let i = 0; i < fragment.length; i++) {
     const item = fragment.get(i);
@@ -76,7 +96,7 @@ export function yjsToJson(fragment: Y.XmlFragment): any {
         content.push(...extractTextWithMarks(item));
       } else {
         // Handle block element nodes
-        const node: any = { type: item.nodeName };
+        const node: JsonNode = { type: item.nodeName };
 
         // Get attributes
         const attrs = item.getAttributes();
@@ -112,8 +132,8 @@ export function yjsToJson(fragment: Y.XmlFragment): any {
 /**
  * Helper to convert element children recursively
  */
-function yjsElementToJson(element: Y.XmlElement): any[] {
-  const content: any[] = [];
+function yjsElementToJson(element: Y.XmlElement): JsonNode[] {
+  const content: JsonNode[] = [];
 
   for (let i = 0; i < element.length; i++) {
     const item = element.get(i);
@@ -127,7 +147,7 @@ function yjsElementToJson(element: Y.XmlElement): any[] {
       if (isMarkElement(item.nodeName)) {
         content.push(...extractTextWithMarks(item));
       } else {
-        const node: any = { type: item.nodeName };
+        const node: JsonNode = { type: item.nodeName };
 
         const attrs = item.getAttributes();
         if (Object.keys(attrs).length > 0) {
@@ -172,7 +192,7 @@ export function jsonToYjs(doc: Y.Doc, fragment: Y.XmlFragment, content: any) {
         fragment.push([text]);
         text.insert(0, node.text || '');
         if (node.marks) {
-          const attrs: Record<string, any> = {};
+          const attrs: JsonAttributes = {};
           for (const mark of node.marks) {
             attrs[mark.type] = mark.attrs || true;
           }
@@ -185,12 +205,12 @@ export function jsonToYjs(doc: Y.Doc, fragment: Y.XmlFragment, content: any) {
         // Set attributes after adding to parent
         if (node.attrs) {
           for (const [key, value] of Object.entries(node.attrs)) {
-            element.setAttribute(key, value as string);
+            element.setAttribute(key, String(value));
           }
         }
         // Recursively add children
         if (node.content) {
-          jsonToYjsChildren(doc, element, node.content);
+          jsonToYjsChildren(element, node.content);
         }
       }
     }
@@ -200,14 +220,14 @@ export function jsonToYjs(doc: Y.Doc, fragment: Y.XmlFragment, content: any) {
 /**
  * Helper to add children without wrapping in another transaction
  */
-function jsonToYjsChildren(doc: Y.Doc, parent: Y.XmlElement, children: any[]) {
+function jsonToYjsChildren(parent: Y.XmlElement, children: JsonNode[]) {
   for (const node of children) {
     if (node.type === 'text') {
       const text = new Y.XmlText();
       parent.push([text]);
       text.insert(0, node.text || '');
       if (node.marks) {
-        const attrs: Record<string, any> = {};
+        const attrs: JsonAttributes = {};
         for (const mark of node.marks) {
           attrs[mark.type] = mark.attrs || true;
         }
@@ -218,11 +238,11 @@ function jsonToYjsChildren(doc: Y.Doc, parent: Y.XmlElement, children: any[]) {
       parent.push([element]);
       if (node.attrs) {
         for (const [key, value] of Object.entries(node.attrs)) {
-          element.setAttribute(key, value as string);
+          element.setAttribute(key, String(value));
         }
       }
       if (node.content) {
-        jsonToYjsChildren(doc, element, node.content);
+        jsonToYjsChildren(element, node.content);
       }
     }
   }

@@ -51,7 +51,20 @@ async function seed() {
   try {
     // Run schema
     const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
-    await pool.query(schema);
+    try {
+      await pool.query(schema);
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== '23505') {
+        throw error;
+      }
+
+      const message = 'detail' in error && typeof error.detail === 'string' ? error.detail : '';
+      if (!message.includes('(extname)=(pg_trgm)')) {
+        throw error;
+      }
+
+      console.log('ℹ️  pg_trgm already registered during schema bootstrap, continuing');
+    }
     console.log('✅ Schema created');
 
     // Check if workspace exists

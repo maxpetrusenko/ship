@@ -304,6 +304,60 @@ describe('Document Visibility', () => {
       expect(res.body.visibility).toBe('private');
     });
 
+    it('rejects overlong titles with a validation error', async () => {
+      const res = await request(app)
+        .post('/api/documents')
+        .set('Cookie', user1SessionCookie)
+        .set('X-CSRF-Token', user1CsrfToken)
+        .send({ title: 'x'.repeat(300), document_type: 'wiki' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Invalid input');
+      expect(JSON.stringify(res.body.details)).toContain('255');
+    });
+
+    it('stores script-like payloads as inert text and json', async () => {
+      const maliciousTitle = `<script>alert("ship")</script> & <b>bold</b>`;
+      const maliciousContent = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: `<img src=x onerror=alert(1)> & special chars '"<>/&`,
+              },
+            ],
+          },
+        ],
+      };
+
+      const res = await request(app)
+        .post('/api/documents')
+        .set('Cookie', user1SessionCookie)
+        .set('X-CSRF-Token', user1CsrfToken)
+        .send({
+          title: maliciousTitle,
+          document_type: 'wiki',
+          content: maliciousContent,
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.title).toBe(maliciousTitle);
+      expect(res.body.content).toEqual(maliciousContent);
+
+      const stored = await pool.query(
+        `SELECT title, content
+         FROM documents
+         WHERE id = $1`,
+        [res.body.id]
+      );
+
+      expect(stored.rows[0].title).toBe(maliciousTitle);
+      expect(stored.rows[0].content).toEqual(maliciousContent);
+    });
+
     it('inherits visibility from parent document', async () => {
       // Create private parent
       const parentResult = await pool.query(

@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { cn } from '@/lib/cn';
 import { useToast } from '@/components/ui/Toast';
+import { BlockingLoadError } from '@/components/ui/BlockingLoadError';
 import { apiPost, apiPatch, apiGet } from '@/lib/api';
 
 interface WeekReviewProps {
@@ -20,6 +21,7 @@ interface ReviewData {
 export function WeekReview({ sprintId }: WeekReviewProps) {
   const [reviewData, setReviewData] = useState<ReviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [planValidated, setPlanValidated] = useState<boolean | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -39,6 +41,8 @@ export function WeekReview({ sprintId }: WeekReviewProps) {
   });
 
   const fetchReview = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const res = await apiGet(`/api/weeks/${sprintId}/review`);
       if (res.ok) {
@@ -49,10 +53,12 @@ export function WeekReview({ sprintId }: WeekReviewProps) {
           editor.commands.setContent(data.content);
         }
       } else {
+        setLoadError('Unable to load the existing weekly review. Retry before editing so you do not work from a misleading blank state.');
         showToast('Failed to load weekly review', 'error');
       }
     } catch (err) {
       console.error('Failed to fetch weekly review:', err);
+      setLoadError('Unable to load the existing weekly review. Retry before editing so you do not work from a misleading blank state.');
       showToast('Failed to load weekly review. Please try again.', 'error');
     } finally {
       setLoading(false);
@@ -120,6 +126,16 @@ export function WeekReview({ sprintId }: WeekReviewProps) {
       <div className="flex h-64 items-center justify-center">
         <div className="text-muted">Loading review...</div>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <BlockingLoadError
+        title="Unable to load weekly review"
+        message={loadError}
+        onRetry={() => { void fetchReview(); }}
+      />
     );
   }
 

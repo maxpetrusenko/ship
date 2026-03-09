@@ -32,6 +32,8 @@ When Ship and Claude Code are integrated:
 3. **Knowledge**: Learnings from completed weeks inform future planning
 4. **Telemetry**: Track iterations, confidence levels, and time per story
 
+Repo-local agent usage snapshots live in [`docs/agent-usage.md`](./agent-usage.md), with append-only history in `docs/metrics/agent-usage.snapshots.jsonl`. Refresh them with `pnpm track:agent-usage`.
+
 ## Setup and Authentication
 
 ### Step 1: Sign Up for Ship

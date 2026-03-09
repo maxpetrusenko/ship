@@ -29,6 +29,79 @@ import {
  * using the UnifiedEditor component with the appropriate sidebar data.
  * Document types with tabs (projects, programs) get a tabbed interface.
  */
+function getStringProperty(document: DocumentResponse | undefined, key: string): string | undefined {
+  const value = document?.properties?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getStringField(document: DocumentResponse, key: string): string | undefined {
+  const value = document[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getNumberField(document: DocumentResponse, key: string): number | undefined {
+  const value = document[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+function getNullableNumberField(document: DocumentResponse, key: string): number | null {
+  const value = document[key];
+  return typeof value === 'number' ? value : null;
+}
+
+function getStringArrayField(document: DocumentResponse, key: string): string[] | undefined {
+  const value = document[key];
+  return Array.isArray(value) && value.every(item => typeof item === 'string') ? value : undefined;
+}
+
+type BelongsToEntry = {
+  id: string;
+  type: 'program' | 'project' | 'sprint' | 'parent';
+  title?: string;
+  color?: string;
+};
+
+function getBelongsToEntries(document: DocumentResponse): BelongsToEntry[] | undefined {
+  const value = document.belongs_to;
+  if (!Array.isArray(value)) return undefined;
+
+  return value.filter((entry): entry is BelongsToEntry => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const candidate = entry as Record<string, unknown>;
+    return typeof candidate.id === 'string' &&
+      (candidate.type === 'program' || candidate.type === 'project' || candidate.type === 'sprint' || candidate.type === 'parent');
+  });
+}
+
+function getOwnerSummary(document: DocumentResponse): { id: string; name: string; email: string } | null {
+  const value = document.owner;
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || typeof candidate.email !== 'string') {
+    return null;
+  }
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    email: candidate.email,
+  };
+}
+
+function getIssueSource(document: DocumentResponse): 'internal' | 'external' | undefined {
+  const value = document.source;
+  return value === 'internal' || value === 'external' ? value : undefined;
+}
+
+function getSprintStatus(document: DocumentResponse): 'planning' | 'active' | 'completed' {
+  const value = document.status;
+  return value === 'active' || value === 'completed' ? value : 'planning';
+}
+
+function getVisibility(document: DocumentResponse): 'private' | 'workspace' | undefined {
+  const value = document.visibility;
+  return value === 'private' || value === 'workspace' ? value : undefined;
+}
+
 export function UnifiedDocumentPage() {
   const { id, '*': wildcardPath } = useParams<{ id: string; '*'?: string }>();
   const navigate = useNavigate();
@@ -66,7 +139,7 @@ export function UnifiedDocumentPage() {
       const docType = document.document_type as 'wiki' | 'issue' | 'project' | 'program' | 'sprint' | 'person' | 'weekly_plan' | 'weekly_retro' | 'standup';
       // Extract projectId for weekly documents
       const projectId = (document.document_type === 'weekly_plan' || document.document_type === 'weekly_retro')
-        ? (document.properties?.project_id as string | undefined) ?? null
+        ? getStringProperty(document, 'project_id') ?? null
         : null;
       setCurrentDocument(id, docType, projectId);
     }
@@ -135,7 +208,7 @@ export function UnifiedDocumentPage() {
   // Compute tab counts based on document type
   const tabCounts: TabCounts = useMemo(() => {
     if (isProject) {
-      const issueCount = (document as { issue_count?: number })?.issue_count ?? 0;
+      const issueCount = document ? getNumberField(document, 'issue_count') ?? 0 : 0;
       return {
         issues: issueCount,
         weeks: projectWeeks.length,
@@ -308,10 +381,10 @@ export function UnifiedDocumentPage() {
   // Resolve standup author name for title suffix
   const standupAuthorName = useMemo(() => {
     if (!isStandup) return undefined;
-    const authorId = document?.properties?.author_id as string | undefined;
+    const authorId = getStringProperty(document, 'author_id');
     if (!authorId) return undefined;
     return teamMembersData.find(m => m.user_id === authorId)?.name;
-  }, [isStandup, document?.properties?.author_id, teamMembersData]);
+  }, [isStandup, document, teamMembersData]);
 
   // Handle back navigation
   const handleBack = useCallback(() => {
@@ -382,7 +455,7 @@ export function UnifiedDocumentPage() {
     if (!document) return null;
 
     // Extract program_id from belongs_to array (via document_associations)
-    const belongsTo = document.belongs_to as Array<{ id: string; type: string }> | undefined;
+    const belongsTo = getBelongsToEntries(document);
     const programIdFromBelongsTo = belongsTo?.find(b => b.type === 'program')?.id;
     const sprintIdFromBelongsTo = belongsTo?.find(b => b.type === 'sprint')?.id;
 
@@ -392,52 +465,47 @@ export function UnifiedDocumentPage() {
       document_type: document.document_type as UnifiedDocument['document_type'],
       created_at: document.created_at,
       updated_at: document.updated_at,
-      created_by: document.created_by as string | undefined,
+      created_by: getStringField(document, 'created_by'),
       properties: document.properties,
       // Spread flattened properties based on type
       ...(document.document_type === 'issue' && {
-        state: (document.state as string) || 'backlog',
-        priority: (document.priority as string) || 'medium',
-        estimate: document.estimate as number | undefined,
-        assignee_id: document.assignee_id as string | undefined,
-        assignee_name: document.assignee_name as string | undefined,
+        state: getStringField(document, 'state') || 'backlog',
+        priority: getStringField(document, 'priority') || 'medium',
+        estimate: getNumberField(document, 'estimate'),
+        assignee_id: getStringField(document, 'assignee_id'),
+        assignee_name: getStringField(document, 'assignee_name'),
         program_id: programIdFromBelongsTo,
         sprint_id: sprintIdFromBelongsTo,
-        source: document.source as 'internal' | 'external' | undefined,
-        converted_from_id: document.converted_from_id as string | undefined,
-        display_id: (document.ticket_number as number) ? `#${document.ticket_number}` : undefined,
-        belongs_to: document.belongs_to as Array<{
-          id: string;
-          type: 'program' | 'project' | 'sprint' | 'parent';
-          title?: string;
-          color?: string;
-        }> | undefined,
+        source: getIssueSource(document),
+        converted_from_id: getStringField(document, 'converted_from_id'),
+        display_id: getNumberField(document, 'ticket_number') ? `#${document.ticket_number}` : undefined,
+        belongs_to: belongsTo,
       }),
       ...(document.document_type === 'project' && {
-        impact: (document.impact as number | null) ?? null,
-        confidence: (document.confidence as number | null) ?? null,
-        ease: (document.ease as number | null) ?? null,
-        color: (document.color as string) || '#3b82f6',
+        impact: getNullableNumberField(document, 'impact'),
+        confidence: getNullableNumberField(document, 'confidence'),
+        ease: getNullableNumberField(document, 'ease'),
+        color: getStringField(document, 'color') || '#3b82f6',
         emoji: null,
         program_id: programIdFromBelongsTo,
-        owner: document.owner as { id: string; name: string; email: string } | null,
-        owner_id: document.owner_id as string | undefined,
+        owner: getOwnerSummary(document),
+        owner_id: getStringField(document, 'owner_id'),
         // RACI fields
-        accountable_id: document.accountable_id as string | undefined,
-        consulted_ids: document.consulted_ids as string[] | undefined,
-        informed_ids: document.informed_ids as string[] | undefined,
-        converted_from_id: document.converted_from_id as string | undefined,
+        accountable_id: getStringField(document, 'accountable_id'),
+        consulted_ids: getStringArrayField(document, 'consulted_ids'),
+        informed_ids: getStringArrayField(document, 'informed_ids'),
+        converted_from_id: getStringField(document, 'converted_from_id'),
       }),
       ...(document.document_type === 'sprint' && {
-        start_date: (document.start_date as string) || '',
-        end_date: (document.end_date as string) || '',
-        status: ((document.status as string) || 'planning') as 'planning' | 'active' | 'completed',
+        start_date: getStringField(document, 'start_date') || '',
+        end_date: getStringField(document, 'end_date') || '',
+        status: getSprintStatus(document),
         program_id: programIdFromBelongsTo,
-        plan: (document.plan as string) || '',
+        plan: getStringField(document, 'plan') || '',
       }),
       ...(document.document_type === 'wiki' && {
-        parent_id: document.parent_id as string | undefined,
-        visibility: document.visibility as 'private' | 'workspace' | undefined,
+        parent_id: getStringField(document, 'parent_id'),
+        visibility: getVisibility(document),
       }),
     } as UnifiedDocument;
   }, [document]);

@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { cn } from '@/lib/cn';
 import { useToast } from '@/components/ui/Toast';
+import { BlockingLoadError } from '@/components/ui/BlockingLoadError';
 import { apiPost, apiPatch, apiGet } from '@/lib/api';
 
 interface ProjectRetroProps {
@@ -30,6 +31,7 @@ interface RetroData {
 export function ProjectRetro({ projectId }: ProjectRetroProps) {
   const [retroData, setRetroData] = useState<RetroData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [planValidated, setPlanValidated] = useState<boolean | null>(null);
   const [monetaryImpactActual, setMonetaryImpactActual] = useState('');
@@ -52,6 +54,8 @@ export function ProjectRetro({ projectId }: ProjectRetroProps) {
   });
 
   const fetchRetro = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const res = await apiGet(`/api/projects/${projectId}/retro`);
       if (res.ok) {
@@ -64,10 +68,12 @@ export function ProjectRetro({ projectId }: ProjectRetroProps) {
           editor.commands.setContent(data.content);
         }
       } else {
+        setLoadError('Unable to load the existing project retrospective. Retry before editing so you do not replace it with a misleading blank draft.');
         showToast('Failed to load project retrospective', 'error');
       }
     } catch (err) {
       console.error('Failed to fetch project retro:', err);
+      setLoadError('Unable to load the existing project retrospective. Retry before editing so you do not replace it with a misleading blank draft.');
       showToast('Failed to load project retrospective. Please try again.', 'error');
     } finally {
       setLoading(false);
@@ -145,6 +151,16 @@ export function ProjectRetro({ projectId }: ProjectRetroProps) {
       <div className="flex h-64 items-center justify-center">
         <div className="text-muted">Loading retrospective...</div>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <BlockingLoadError
+        title="Unable to load project retrospective"
+        message={loadError}
+        onRetry={() => { void fetchRetro(); }}
+      />
     );
   }
 

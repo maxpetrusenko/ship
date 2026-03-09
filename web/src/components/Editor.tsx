@@ -24,6 +24,7 @@ import { cn } from '@/lib/cn';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ScrollFade } from '@/components/ui/ScrollFade';
 import { apiPost } from '@/lib/api';
+import { stringToPresenceColor } from '@/lib/presenceColors';
 import { createSlashCommands } from './editor/SlashCommands';
 import { DocumentEmbed } from './editor/DocumentEmbed';
 import { DragHandleExtension } from './editor/DragHandle';
@@ -91,16 +92,6 @@ interface EditorProps {
 }
 
 type SyncStatus = 'connecting' | 'cached' | 'synced' | 'disconnected';
-
-// Generate a consistent color from a string
-function stringToColor(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 60%)`;
-}
 
 // Extract document mention IDs from TipTap JSON content
 function extractDocumentMentionIds(content: JSONContent): string[] {
@@ -261,7 +252,7 @@ export function Editor({
     };
   }, []);
 
-  const color = userColor || stringToColor(userName);
+  const color = userColor || stringToPresenceColor(userName);
 
   // Auto-focus and select title if "Untitled" (new document)
   // Uses double requestAnimationFrame to run AFTER useFocusOnNavigate's

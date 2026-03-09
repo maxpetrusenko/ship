@@ -186,6 +186,47 @@ describe('Standups API', () => {
       expect(response.status).toBe(201)
       expect(response.body.title).toBe('Standup Update')
     })
+
+    it('stores script-like standup payloads as inert text and json', async () => {
+      const maliciousTitle = `<script>alert("week")</script> & status`
+      const maliciousContent = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: `<svg onload=alert(1)> & special chars '"<>/& ${'x'.repeat(512)}`,
+              },
+            ],
+          },
+        ],
+      }
+
+      const response = await request(app)
+        .post(`/api/weeks/${testSprintId}/standups`)
+        .set('Cookie', sessionCookie)
+        .set('x-csrf-token', csrfToken)
+        .send({
+          title: maliciousTitle,
+          content: maliciousContent,
+        })
+
+      expect(response.status).toBe(201)
+      expect(response.body.title).toBe(maliciousTitle)
+      expect(response.body.content).toEqual(maliciousContent)
+
+      const stored = await pool.query(
+        `SELECT title, content
+         FROM documents
+         WHERE id = $1`,
+        [response.body.id]
+      )
+
+      expect(stored.rows[0].title).toBe(maliciousTitle)
+      expect(stored.rows[0].content).toEqual(maliciousContent)
+    })
   })
 
   describe('GET /api/weeks/:id/standups', () => {

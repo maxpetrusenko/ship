@@ -6,6 +6,21 @@ import { isWorkspaceAdmin } from '../middleware/visibility.js';
 type RouterType = ReturnType<typeof Router>;
 export const searchRouter: RouterType = Router();
 
+function readQueryString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function readAuthContext(req: Request): { userId: string; workspaceId: string } | null {
+  if (!req.userId || !req.workspaceId) {
+    return null;
+  }
+
+  return {
+    userId: req.userId,
+    workspaceId: req.workspaceId,
+  };
+}
+
 // SECURITY: Escape SQL LIKE pattern special characters to prevent wildcard injection
 // This prevents users from using % and _ to match arbitrary patterns
 function escapeLikePattern(str: string): string {
@@ -16,12 +31,17 @@ function escapeLikePattern(str: string): string {
 // GET /api/search/mentions?q=:query
 searchRouter.get('/mentions', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const searchQuery = (req.query.q as string) || '';
-    const workspaceId = req.workspaceId!;
-    const userId = req.userId!;
+    const searchQuery = readQueryString(req.query.q);
+    const authContext = readAuthContext(req);
+    if (!authContext) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { workspaceId, userId } = authContext;
 
     // SECURITY: Escape wildcard characters to prevent SQL wildcard injection
-    const sanitizedQuery = escapeLikePattern(searchQuery);
+    const sanitizedQuery = escapeLikePattern(searchQuery).toLowerCase();
 
     // Check if user is admin for visibility filtering
     const isAdmin = await isWorkspaceAdmin(userId, workspaceId);
@@ -38,7 +58,7 @@ searchRouter.get('/mentions', authMiddleware, async (req: Request, res: Response
          AND d.document_type = 'person'
          AND d.archived_at IS NULL
          AND d.deleted_at IS NULL
-         AND d.title ILIKE $2
+         AND LOWER(d.title) LIKE $2
        ORDER BY d.title ASC
        LIMIT 5`,
       [workspaceId, `%${sanitizedQuery}%`]
@@ -52,7 +72,7 @@ searchRouter.get('/mentions', authMiddleware, async (req: Request, res: Response
        WHERE workspace_id = $1
          AND document_type IN ('wiki', 'issue', 'project', 'program')
          AND deleted_at IS NULL
-         AND title ILIKE $2
+         AND LOWER(title) LIKE $2
          AND (visibility = 'workspace' OR created_by = $3 OR $4 = TRUE)
        ORDER BY
          CASE document_type
@@ -81,14 +101,20 @@ searchRouter.get('/mentions', authMiddleware, async (req: Request, res: Response
 // GET /api/search/learnings?q=:query&program_id=:program_id
 searchRouter.get('/learnings', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const searchQuery = (req.query.q as string) || '';
-    const programId = req.query.program_id as string | undefined;
-    const workspaceId = req.workspaceId!;
-    const userId = req.userId!;
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const searchQuery = readQueryString(req.query.q);
+    const programId = typeof req.query.program_id === 'string' ? req.query.program_id : undefined;
+    const authContext = readAuthContext(req);
+    if (!authContext) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { workspaceId, userId } = authContext;
+    const rawLimit = Number.parseInt(readQueryString(req.query.limit), 10);
+    const limit = Math.min(Number.isNaN(rawLimit) ? 10 : rawLimit, 50);
 
     // SECURITY: Escape wildcard characters to prevent SQL wildcard injection
-    const sanitizedQuery = escapeLikePattern(searchQuery);
+    const sanitizedQuery = escapeLikePattern(searchQuery).toLowerCase();
 
     // Check if user is admin for visibility filtering
     const isAdmin = await isWorkspaceAdmin(userId, workspaceId);
@@ -129,12 +155,12 @@ searchRouter.get('/learnings', authMiddleware, async (req: Request, res: Respons
       const queryParamIndex = params.length;
       query += `
         AND (
-          d.title ILIKE $${queryParamIndex}
+          LOWER(d.title) LIKE $${queryParamIndex}
           OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(d.properties->'tags') AS tag
-            WHERE tag ILIKE $${queryParamIndex}
+            WHERE LOWER(tag) LIKE $${queryParamIndex}
           )
-          OR d.properties->>'category' ILIKE $${queryParamIndex}
+          OR LOWER(COALESCE(d.properties->>'category', '')) LIKE $${queryParamIndex}
         )
       `;
     }

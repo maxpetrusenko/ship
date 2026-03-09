@@ -181,10 +181,51 @@ const updatePlanSchema = z.object({
   confidence: z.number().int().min(0).max(100).optional(),
 });
 
+interface SprintProperties {
+  sprint_number?: number;
+  status?: string;
+  plan?: string | null;
+  success_criteria?: string[] | null;
+  confidence?: number | null;
+  plan_history?: unknown;
+  is_complete?: boolean | null;
+  missing_fields?: string[];
+  planned_issue_ids?: string[] | null;
+  snapshot_taken_at?: string | null;
+  plan_approval?: string | null;
+  review_approval?: string | null;
+  review_rating?: number | null;
+  accountable_id?: string | null;
+}
+
+interface SprintRow {
+  id: string;
+  title: string;
+  properties?: SprintProperties | null;
+  owner_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
+  program_id?: string | null;
+  program_name?: string | null;
+  program_prefix?: string | null;
+  program_accountable_id?: string | null;
+  owner_reports_to?: string | null;
+  workspace_sprint_start_date?: string | null;
+  issue_count?: string | number | null;
+  completed_count?: string | number | null;
+  started_count?: string | number | null;
+  has_plan?: boolean | 't' | 'f';
+  has_retro?: boolean | 't' | 'f';
+  retro_outcome?: string | null;
+  retro_id?: string | null;
+}
+
+type SqlValue = string | number | boolean | string[] | null;
+
 // Helper to extract sprint from row
 // Dates and status are computed on frontend from sprint_number + workspace.sprint_start_date
-function extractSprintFromRow(row: any) {
-  const props = row.properties || {};
+function extractSprintFromRow(row: SprintRow) {
+  const props = row.properties ?? {};
   return {
     id: row.id,
     name: row.title,
@@ -201,9 +242,9 @@ function extractSprintFromRow(row: any) {
     program_accountable_id: row.program_accountable_id || null,
     owner_reports_to: row.owner_reports_to || null,
     workspace_sprint_start_date: row.workspace_sprint_start_date,
-    issue_count: parseInt(row.issue_count) || 0,
-    completed_count: parseInt(row.completed_count) || 0,
-    started_count: parseInt(row.started_count) || 0,
+    issue_count: Number.parseInt(String(row.issue_count ?? 0), 10) || 0,
+    completed_count: Number.parseInt(String(row.completed_count ?? 0), 10) || 0,
+    started_count: Number.parseInt(String(row.started_count ?? 0), 10) || 0,
     has_plan: row.has_plan === true || row.has_plan === 't',
     has_retro: row.has_retro === true || row.has_retro === 't',
     // Retro outcome summary (populated if retro exists)
@@ -606,7 +647,7 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
     const daysRemaining = isHistorical ? 0 : Math.max(0, Math.ceil((targetSprintEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 
     // Build dynamic WHERE clause for issue filters
-    const params: any[] = [workspaceId, targetSprintNumber, userId, isAdmin];
+    const params: Array<string | number | boolean> = [workspaceId, targetSprintNumber, userId, isAdmin];
     let filterConditions = '';
 
     if (state && typeof state === 'string') {
@@ -1050,7 +1091,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     const currentProps = existing.rows[0].properties || {};
     const programId = existing.rows[0].program_id;
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: SqlValue[] = [];
     let paramIndex = 1;
 
     const data = parsed.data;
@@ -2426,7 +2467,7 @@ router.patch('/:id/review', authMiddleware, async (req: Request, res: Response) 
 
     // Build update query
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: SqlValue[] = [];
     let paramIndex = 1;
 
     if (content !== undefined) {

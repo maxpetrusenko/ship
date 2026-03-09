@@ -8,9 +8,34 @@ import { logAuditEvent } from '../services/audit.js';
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
+interface ProgramProperties {
+  color?: string;
+  emoji?: string | null;
+  owner_id?: string | null;
+  accountable_id?: string | null;
+  consulted_ids?: string[];
+  informed_ids?: string[];
+}
+
+interface ProgramRow {
+  id: string;
+  title: string;
+  properties?: ProgramProperties | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  issue_count?: number;
+  sprint_count?: number;
+  owner_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
+}
+
+type SqlValue = string | number | boolean | string[] | null;
+
 // Helper to extract program from row
-function extractProgramFromRow(row: any) {
-  const props = row.properties || {};
+function extractProgramFromRow(row: ProgramRow) {
+  const props = row.properties ?? {};
   return {
     id: row.id,
     name: row.title,
@@ -223,7 +248,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     const currentProps = existing.rows[0].properties || {};
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: SqlValue[] = [];
     let paramIndex = 1;
 
     const data = parsed.data;
