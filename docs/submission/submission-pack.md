@@ -9,14 +9,15 @@ Status:
 
 ## Core Files
 
-- audit and improvement doc: [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
-- merged final narrative: [`docs/final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/final-narrative.md)
-- demo script: [`docs/demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/demo-script.md)
-- submission checklist: [`docs/submission-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/submission-checklist.md)
-- blocker list: [`docs/delivery-blockers.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/delivery-blockers.md)
-- screen-reader runbook: [`docs/screen-reader-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/screen-reader-checklist.md)
-- social draft: [`docs/social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/social-post-draft.md)
-- verification record: [`docs/verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/verification-record.md)
+- audit and improvement doc: [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
+- merged final narrative: [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
+- demo script: [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
+- submission checklist: [`submission-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/submission-checklist.md)
+- blocker list: [`delivery-blockers.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/delivery-blockers.md)
+- screen-reader runbook: [`screen-reader-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/screen-reader-checklist.md)
+- social draft: [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
+- verification record: [`verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/verification-record.md)
+- assignment requirements mirror: [`requirements.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/requirements.md)
 
 ## Evidence Snapshot
 
@@ -49,13 +50,15 @@ Need:
 - README setup delta if the fork requires anything beyond upstream
 
 Current status:
-- manual-only
-- not available in this local packaging session
+- fork URL: `https://github.com/maxpetrusenko/ship`
+- pushed branch: `chore/submission-package`
+- fork default branch updated: `master`
+- no fork-specific setup delta documented yet
 
 ### 2. Audit Report
 
 Primary file:
-- [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
+- [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 
 Optional hardening:
 - add deploy, fork, and branch metadata once the remote packaging work is done
@@ -63,8 +66,8 @@ Optional hardening:
 ### 3. Improvement Documentation
 
 Primary files:
-- [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
-- [`docs/final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/final-narrative.md)
+- [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
+- [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 
 Still needed:
 - deploy and fork metadata inserts
@@ -72,12 +75,12 @@ Still needed:
 ### 4. Discovery Write-up
 
 Ready in:
-- [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
+- [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 
 ### 5. Demo Video
 
 Script ready in:
-- [`docs/demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/demo-script.md)
+- [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
 
 Current status:
 - manual-only after recording
@@ -85,7 +88,7 @@ Current status:
 ### 6. AI Cost Analysis
 
 Ready in:
-- [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
+- [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 
 ### 7. Deployed Application
 
@@ -95,7 +98,7 @@ Current status:
 ### 8. Social Post
 
 Draft ready in:
-- [`docs/social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/social-post-draft.md)
+- [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
 
 Current status:
 - manual-only after publication

@@ -21,18 +21,18 @@ Date: 2026-03-09
 
 Why blocked:
 
-- the repo only has `upstream` configured right now
-- no personal fork remote is configured locally
+- fork now exists at `https://github.com/maxpetrusenko/ship`
+- local repo now has both `upstream` and `origin`
 - deployment scripts target AWS infrastructure and need cloud credentials plus environment config
 
 Local evidence:
 
-- current remote output only shows `upstream`:
-  - `https://github.com/US-Department-of-the-Treasury/ship.git`
+- current fork branch pushed:
+  - `origin/master`
+  - `origin/chore/submission-package`
 
 Needed to close:
 
-- add fork remote
 - choose deploy target
 - provide AWS credentials / env or an alternate hosting path
 
@@ -44,7 +44,7 @@ Why blocked:
 
 Needed to close:
 
-- record the walkthrough using [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/demo-script.md)
+- record the walkthrough using [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
 
 ### 3. Social post publication
 
@@ -54,11 +54,10 @@ Why blocked:
 
 Needed to close:
 
-- post one of the drafts in [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/social-post-draft.md)
+- post one of the drafts in [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
 
 ## Recommended Next Order
 
-1. configure fork remote
-2. choose deployment target and deploy
-3. record demo video
-4. publish social post
+1. choose deployment target and deploy
+2. record demo video
+3. publish social post

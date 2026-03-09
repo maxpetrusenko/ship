@@ -14,7 +14,7 @@ Deliver a clear 3 to 5 minute walkthrough that sounds natural out loud and ties 
 
 Show:
 
-- [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
+- [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 - repo root
 
 ### 2. What the system is
@@ -23,7 +23,7 @@ Show:
 
 Show:
 
-- orientation section in [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
+- orientation section in [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 - architecture docs list
 
 ### 3. Biggest frontend win
@@ -34,7 +34,7 @@ Show:
 
 - [`UnifiedEditor.tsx`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/components/UnifiedEditor.tsx)
 - [`PersonEditor.tsx`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/pages/PersonEditor.tsx)
-- bundle before and after numbers in [`docs/final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/final-narrative.md)
+- bundle before and after numbers in [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 
 ### 4. Biggest backend win
 
@@ -55,7 +55,7 @@ Show:
 - [`useSessionTimeout.ts`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/hooks/useSessionTimeout.ts)
 - [`ErrorBoundary.tsx`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/components/ui/ErrorBoundary.tsx)
 - [`Login.tsx`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/pages/Login.tsx)
-- [`verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/verification-record.md)
+- [`verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/verification-record.md)
 
 Say:
 
@@ -67,8 +67,8 @@ Say:
 
 Show:
 
-- Category 7 in [`docs/presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/presearch-codex.md)
-- [`docs/verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/docs/verification-record.md)
+- Category 7 in [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
+- [`verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/verification-record.md)
 
 ### 7. Close
 
@@ -86,5 +86,5 @@ Show:
 
 ## Link Placeholders
 
-- Fork: `<GITHUB_FORK_URL>`
+- Fork: `https://github.com/maxpetrusenko/ship`
 - Demo: `<LOOM_URL>`
