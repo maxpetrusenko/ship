@@ -24,6 +24,7 @@
     "demo:proof": "./scripts/run-demo-proof.sh",
     "demo:proof:full": "./scripts/run-demo-proof.sh --full-gate",
     "demo:proof:a11y": "./scripts/run-demo-proof.sh --with-a11y",
+    "smoke:hostinger": "./scripts/smoke-hostinger.sh",
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",

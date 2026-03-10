@@ -1,0 +1,43 @@
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+RUN npm config set strict-ssl false
+RUN npm install -g pnpm@10 && pnpm config set strict-ssl false
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
+COPY api/package.json ./api/
+COPY shared/package.json ./shared/
+
+RUN mkdir -p web && echo '{"name":"@ship/web","version":"0.0.0","private":true}' > web/package.json
+
+RUN pnpm install --filter @ship/api --filter @ship/shared --ignore-scripts
+
+COPY shared/ ./shared/
+COPY api/ ./api/
+
+RUN pnpm build:shared && pnpm --filter @ship/api build
+
+FROM node:20-slim
+
+WORKDIR /app
+
+RUN npm config set strict-ssl false
+RUN npm install -g pnpm@10 && pnpm config set strict-ssl false
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY api/package.json ./api/
+COPY shared/package.json ./shared/
+
+RUN pnpm install --prod --filter @ship/api --filter @ship/shared --ignore-scripts
+
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/api/dist ./api/dist
+
+RUN mkdir -p /app/api/uploads
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+WORKDIR /app/api
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/index.js"]

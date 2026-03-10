@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ship}
+      POSTGRES_USER: ${POSTGRES_USER:-ship}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ship_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ship} -d ${POSTGRES_DB:-ship}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api.prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AWS_SSM_ENABLED: 0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ship}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ship}
+      SESSION_SECRET: ${SESSION_SECRET}
+      CORS_ORIGIN: https://${PUBLIC_HOST}
+      APP_BASE_URL: https://${PUBLIC_HOST}
+      CDN_DOMAIN: ${PUBLIC_HOST}
+      DATABASE_SSL: "false"
+      S3_UPLOADS_BUCKET: ${S3_UPLOADS_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CAIA_ISSUER_URL: ${CAIA_ISSUER_URL:-}
+      CAIA_CLIENT_ID: ${CAIA_CLIENT_ID:-}
+      CAIA_CLIENT_SECRET: ${CAIA_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ship_uploads_data:/app/api/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web.prod
+      args:
+        VITE_API_URL: ""
+        VITE_APP_ENV: production
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ship_caddy_data:/data
+      - ship_caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  ship_postgres_data:
+  ship_uploads_data:
+  ship_caddy_data:
+  ship_caddy_config:

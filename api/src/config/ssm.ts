@@ -35,9 +35,23 @@ export async function getSSMSecret(name: string): Promise<string> {
   return response.Parameter.Value;
 }
 
+function hasDirectProductionConfig(): boolean {
+  return [
+    process.env.DATABASE_URL,
+    process.env.SESSION_SECRET,
+    process.env.CORS_ORIGIN,
+    process.env.APP_BASE_URL,
+  ].every(Boolean);
+}
+
 export async function loadProductionSecrets(): Promise<void> {
   if (process.env.NODE_ENV !== 'production') {
     return; // Use .env files for local dev
+  }
+
+  if (process.env.AWS_SSM_ENABLED === '0' || hasDirectProductionConfig()) {
+    console.log('Using direct environment configuration for production runtime');
+    return;
   }
 
   const environment = process.env.ENVIRONMENT || 'prod';

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { authMiddleware } from '../middleware/auth.js';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { usesS3Storage } from '../utils/runtime-storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -119,8 +120,7 @@ filesRouter.post('/upload', authMiddleware, async (req: Request, res: Response) 
 
     // For local development: use a local upload endpoint
     // For production: generate S3 presigned URL for direct browser upload
-    const isProduction = process.env.NODE_ENV === 'production';
-    const uploadUrl = isProduction
+    const uploadUrl = usesS3Storage()
       ? await generateS3PresignedUrl(s3Key, mimeType, sizeBytes)
       : `/api/files/${fileId}/local-upload`;
 
@@ -247,9 +247,8 @@ filesRouter.post('/:id/confirm', authMiddleware, async (req: Request, res: Respo
     // For local dev: file was already saved in local-upload
 
     // Generate CDN URL
-    const isProduction = process.env.NODE_ENV === 'production';
     let cdnUrl: string;
-    if (isProduction) {
+    if (usesS3Storage()) {
       const cdnDomain = process.env.CDN_DOMAIN;
       if (!cdnDomain) {
         throw new Error('CDN_DOMAIN environment variable is required in production');
@@ -375,8 +374,7 @@ filesRouter.delete('/:id', authMiddleware, async (req: Request, res: Response) =
     const file = fileResult.rows[0];
 
     // Delete from storage (local or S3)
-    const isProduction = process.env.NODE_ENV === 'production';
-    if (isProduction && S3_BUCKET_NAME) {
+    if (usesS3Storage()) {
       const client = getS3Client();
       const command = new DeleteObjectCommand({
         Bucket: S3_BUCKET_NAME,
