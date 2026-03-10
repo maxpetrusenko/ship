@@ -2,6 +2,36 @@
 
 Date: 2026-03-09
 
+## Quick Rerun
+
+For a fast local proof pass before a demo:
+
+```bash
+cd ShipShape
+corepack pnpm demo:proof
+```
+
+This command is demo-focused: it reruns the fast, stable checks tied to the live walkthrough, not the entire API suite.
+
+It also prints a short summary for the demo:
+- current type-safety counts versus the audit baseline
+- current main entry chunk versus the audit baseline
+- current green verification commands for runtime, web, API-focused proof, and build
+
+If you want the recorded full gate as well:
+
+```bash
+cd ShipShape
+corepack pnpm demo:proof:full
+```
+
+Optional accessibility rerun if the local app is already running:
+
+```bash
+cd ShipShape
+DEMO_PROOF_BASE_URL=http://localhost:5174 corepack pnpm demo:proof:a11y
+```
+
 ## Commands Run
 
 1. `corepack pnpm --filter @ship/web exec vitest run src/lib/presenceColors.test.ts src/components/ui/ErrorBoundary.test.tsx src/pages/Login.test.tsx`
@@ -30,7 +60,7 @@ Result:
 5. `corepack pnpm test`
 Result:
 - `28` files passed
-- `451` tests passed
+- `454` tests passed
 
 6. Live headless axe rerun against the running local app at `http://localhost:5174`
 Command:

@@ -10,16 +10,17 @@ Deliver a clear 3 to 5 minute walkthrough that sounds natural out loud and ties 
 
 ### 1. Opening
 
-`For this project, the goal was not to build a new feature first. The goal was to inherit a real TypeScript monorepo, understand how it works, measure its health across seven categories, improve it, and prove the improvements with before and after evidence.`
+`This project used Ship, a task and project management tool built by the U.S. Department of the Treasury. It was already a solid, production-shaped system when I came in. My job was not to rescue a broken app. My job was to audit a real codebase, understand it deeply, find the highest-value gaps, improve it further across seven categories, and back every claim with before and after evidence.`
 
 Show:
 
+- [`demo-proof-card.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-proof-card.md)
 - [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 - repo root
 
 ### 2. What the system is
 
-`This repository is a pnpm monorepo with a React frontend, Express API, shared types, Playwright tests, PostgreSQL, and Yjs based collaboration. The most important architectural idea is that everything is treated as a document, so issues, docs, programs, projects, and weeks all share the same underlying model.`
+`This repository is a pnpm monorepo with a React frontend, Express API, shared types, Playwright tests, PostgreSQL, and Yjs based collaboration. It already had a strong foundation from the beginning: clear package boundaries, meaningful tests, and a coherent document model. The most important architectural idea is that issues, docs, programs, projects, and weeks are all treated as documents under one shared model.`
 
 Show:
 
@@ -48,7 +49,7 @@ Show:
 
 ### 5. Reliability and quality work
 
-`I also worked on reliability, not just speed. I fixed runtime confusion around transient session extension failures, improved crash fallback announcements, repaired stale or weak tests, and added focused regression coverage around presence colors, error boundaries, and login validation.`
+`I also worked on reliability and quality, not just speed. I fixed runtime confusion around transient session extension failures, improved crash fallback announcements, repaired stale or weak tests, and pushed on Category 1 type safety by reducing unsafe typing in high-traffic code paths. That category improved meaningfully, but it was also the one rubric target I improved without fully clearing.`
 
 Show:
 
@@ -59,7 +60,7 @@ Show:
 
 Say:
 
-`At verification time, the web suite was 164 out of 164 passing, the API suite was 451 out of 451 passing, type-check passed, and the web build passed.`
+`At verification time, the web suite was 164 out of 164 passing, the API suite was 454 out of 454 passing, type-check passed, and the web build passed.`
 
 ### 6. Accessibility
 
@@ -72,15 +73,16 @@ Show:
 
 ### 7. Close
 
-`The biggest takeaway from this project is that orientation and measurement made the fixes much better. Instead of guessing, I built a model of the system first, measured real bottlenecks, made targeted changes, and kept the final writeup tied to reproducible evidence.`
+`The biggest takeaway from this project is that the starting point mattered. Ship was already a solid Treasury codebase, so the value was not basic cleanup. The value was understanding where a good system still had room to improve, then making targeted changes with reproducible proof.`
 
 `If you want to review the full work, the repo fork is here: <GITHUB_FORK_URL>, and the recorded demo is here: <LOOM_URL>.`
 
 ## Recording Notes
 
+- keep `docs/submission/demo-proof-card.md` open first
 - keep `docs/presearch-codex.md` open
 - keep `docs/verification-record.md` open
-- keep one terminal tab ready with passing test output
+- keep one terminal tab ready with `cd ShipShape && corepack pnpm demo:proof`
 - do not read large code blocks line by line
 - use numbers sparingly and only when they support a point
 
