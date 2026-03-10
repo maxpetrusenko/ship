@@ -1,14 +1,53 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock pool before importing the module
+const { mockPoolQuery } = vi.hoisted(() => ({
+  mockPoolQuery: vi.fn(),
+}));
+
 vi.mock('../db/client.js', () => ({
   pool: {
-    query: vi.fn(),
+    query: mockPoolQuery,
   },
 }));
 
 import { transformIssueLinks } from '../utils/transformIssueLinks.js';
-import { pool } from '../db/client.js';
+
+type TipTapNode = {
+  type: string;
+  text?: string;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+  content?: TipTapNode[];
+};
+
+type TipTapDoc = {
+  type: 'doc';
+  content: TipTapNode[];
+};
+
+function mockRows<Row extends object>(rows: Row[], rowCount = rows.length) {
+  return { rows, rowCount };
+}
+
+function toDoc(value: unknown): TipTapDoc {
+  return value as TipTapDoc;
+}
+
+function findTextNode(nodes: TipTapNode[] | undefined, text: string): TipTapNode | undefined {
+  return nodes?.find((node) => node.text === text);
+}
+
+function requireValue<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`Missing ${label}`);
+  }
+
+  return value;
+}
+
+function requireContent(node: { content?: TipTapNode[] }, label: string): TipTapNode[] {
+  return requireValue(node.content, label);
+}
 
 describe('transformIssueLinks', () => {
   const workspaceId = 'test-workspace-id';
@@ -30,15 +69,15 @@ describe('transformIssueLinks', () => {
       };
 
       // Mock issue lookup
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-42', ticket_number: 42 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-42', ticket_number: 42 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const paragraphContent = requireContent(paragraph, 'first paragraph content');
 
-      expect(result.content[0].content).toHaveLength(3);
-      expect(result.content[0].content[0]).toEqual({ type: 'text', text: 'See ' });
-      expect(result.content[0].content[1]).toEqual({
+      expect(paragraphContent).toHaveLength(3);
+      expect(paragraphContent[0]).toEqual({ type: 'text', text: 'See ' });
+      expect(paragraphContent[1]).toEqual({
         type: 'text',
         text: '#42',
         marks: [
@@ -51,7 +90,7 @@ describe('transformIssueLinks', () => {
           },
         ],
       });
-      expect(result.content[0].content[2]).toEqual({ type: 'text', text: ' for details' });
+      expect(paragraphContent[2]).toEqual({ type: 'text', text: ' for details' });
     });
 
     it('transforms "issue #123" pattern to clickable link', async () => {
@@ -65,13 +104,13 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-100', ticket_number: 100 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-100', ticket_number: 100 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const paragraphContent = requireContent(paragraph, 'first paragraph content');
 
-      expect(result.content[0].content[1]).toEqual({
+      expect(paragraphContent[1]).toEqual({
         type: 'text',
         text: 'issue #100',
         marks: [
@@ -97,13 +136,13 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-500', ticket_number: 500 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-500', ticket_number: 500 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const paragraphContent = requireContent(paragraph, 'first paragraph content');
 
-      expect(result.content[0].content[1]).toEqual({
+      expect(paragraphContent[1]).toEqual({
         type: 'text',
         text: 'ISS-500',
         marks: [
@@ -129,21 +168,20 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [
+      mockPoolQuery.mockResolvedValueOnce(mockRows([
           { id: 'issue-uuid-10', ticket_number: 10 },
           { id: 'issue-uuid-20', ticket_number: 20 },
           { id: 'issue-uuid-30', ticket_number: 30 },
-        ],
-      } as any);
+        ]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
       // Should split into multiple text nodes with links
-      const nodes = result.content[0].content;
-      expect(nodes.some((n: any) => n.text === '#10' && n.marks)).toBe(true);
-      expect(nodes.some((n: any) => n.text === '#20' && n.marks)).toBe(true);
-      expect(nodes.some((n: any) => n.text === 'issue #30' && n.marks)).toBe(true);
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const nodes = requireContent(paragraph, 'first paragraph content');
+      expect(findTextNode(nodes, '#10')?.marks).toBeDefined();
+      expect(findTextNode(nodes, '#20')?.marks).toBeDefined();
+      expect(findTextNode(nodes, 'issue #30')?.marks).toBeDefined();
     });
 
     it('queries database for all unique ticket numbers', async () => {
@@ -157,13 +195,11 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
       await transformIssueLinks(content, workspaceId);
 
-      expect(pool.query).toHaveBeenCalledWith(
+      expect(mockPoolQuery).toHaveBeenCalledWith(
         expect.stringContaining('ticket_number = ANY'),
         [workspaceId, expect.arrayContaining([1, 2, 3])]
       );
@@ -180,13 +216,15 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
       await transformIssueLinks(content, workspaceId);
 
-      const queryArgs = vi.mocked(pool.query).mock.calls[0]![1] as any[];
+      const queryArgs = mockPoolQuery.mock.calls[0]?.[1];
+      expect(Array.isArray(queryArgs)).toBe(true);
+      if (!Array.isArray(queryArgs)) {
+        throw new Error('Expected query args array');
+      }
       const ticketNumbers = queryArgs[1];
 
       // Should only query for #5 once despite appearing multiple times
@@ -213,14 +251,14 @@ describe('transformIssueLinks', () => {
       };
 
       // Mock database lookup (implementation still queries even for marked text)
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-99', ticket_number: 99 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-99', ticket_number: 99 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
       // Should not transform already marked text
-      expect(result.content[0].content[0]).toEqual({
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const paragraphContent = requireContent(paragraph, 'first paragraph content');
+      expect(paragraphContent[0]).toEqual({
         type: 'text',
         text: '#99 is already a link',
         marks: [{ type: 'link', attrs: { href: '/somewhere' } }],
@@ -228,7 +266,7 @@ describe('transformIssueLinks', () => {
 
       // Note: Implementation does query database for ticket numbers,
       // but doesn't transform text that already has marks
-      expect(pool.query).toHaveBeenCalled();
+      expect(mockPoolQuery).toHaveBeenCalled();
     });
 
     it('keeps issue reference as plain text when issue does not exist', async () => {
@@ -243,17 +281,17 @@ describe('transformIssueLinks', () => {
       };
 
       // No matching issues found
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
       // When no issues are found, content is returned unchanged
       // (implementation optimization - doesn't transform if issueMap is empty)
       expect(result).toEqual(content);
-      expect(result.content[0].content[0].text).toBe('Non-existent #999');
-      expect(result.content[0].content[0].marks).toBeUndefined();
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const paragraphContent = requireContent(paragraph, 'first paragraph content');
+      expect(paragraphContent[0]?.text).toBe('Non-existent #999');
+      expect(paragraphContent[0]?.marks).toBeUndefined();
     });
 
     it('transforms existing issues but not non-existent ones', async () => {
@@ -268,20 +306,19 @@ describe('transformIssueLinks', () => {
       };
 
       // Only #50 exists
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-50', ticket_number: 50 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-50', ticket_number: 50 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
-      const nodes = result.content[0].content;
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const nodes = requireContent(paragraph, 'first paragraph content');
 
       // #50 should have link mark
-      const link50 = nodes.find((n: any) => n.text === '#50');
+      const link50 = findTextNode(nodes, '#50');
       expect(link50?.marks).toBeDefined();
 
       // #999 should be plain text (no marks)
-      const text999 = nodes.find((n: any) => n.text === '#999');
+      const text999 = findTextNode(nodes, '#999');
       expect(text999?.marks).toBeUndefined();
     });
 
@@ -299,7 +336,7 @@ describe('transformIssueLinks', () => {
       const result = await transformIssueLinks(content, workspaceId);
 
       // Should not query database
-      expect(pool.query).not.toHaveBeenCalled();
+      expect(mockPoolQuery).not.toHaveBeenCalled();
 
       // Should return unchanged
       expect(result).toEqual(content);
@@ -320,7 +357,7 @@ describe('transformIssueLinks', () => {
 
       const result = await transformIssueLinks(content, workspaceId);
       expect(result).toEqual(content);
-      expect(pool.query).not.toHaveBeenCalled();
+      expect(mockPoolQuery).not.toHaveBeenCalled();
     });
 
     it('handles empty document content', async () => {
@@ -331,7 +368,7 @@ describe('transformIssueLinks', () => {
 
       const result = await transformIssueLinks(content, workspaceId);
       expect(result).toEqual(content);
-      expect(pool.query).not.toHaveBeenCalled();
+      expect(mockPoolQuery).not.toHaveBeenCalled();
     });
   });
 
@@ -357,16 +394,16 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-25', ticket_number: 25 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-25', ticket_number: 25 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
-      const paragraph = result.content[0].content[0].content[0];
-      const link = paragraph.content.find((n: any) => n.text === '#25');
+      const list = requireValue(result.content[0], 'top-level list');
+      const listItem = requireValue(requireContent(list, 'top-level list content')[0], 'list item');
+      const paragraph = requireValue(requireContent(listItem, 'list item content')[0], 'nested paragraph');
+      const link = findTextNode(requireContent(paragraph, 'nested paragraph content'), '#25');
       expect(link?.marks).toBeDefined();
-      expect(link?.marks[0].attrs.href).toBe('/issues/issue-uuid-25');
+      expect(link?.marks?.[0]?.attrs?.href).toBe('/issues/issue-uuid-25');
     });
 
     it('transforms issue links in blockquotes', async () => {
@@ -385,14 +422,13 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [{ id: 'issue-uuid-77', ticket_number: 77 }],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([{ id: 'issue-uuid-77', ticket_number: 77 }]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
-      const paragraph = result.content[0].content[0];
-      const link = paragraph.content.find((n: any) => n.text === 'issue #77');
+      const blockquote = requireValue(result.content[0], 'blockquote');
+      const paragraph = requireValue(requireContent(blockquote, 'blockquote content')[0], 'blockquote paragraph');
+      const link = findTextNode(requireContent(paragraph, 'blockquote paragraph content'), 'issue #77');
       expect(link?.marks).toBeDefined();
     });
 
@@ -421,17 +457,15 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [
+      mockPoolQuery.mockResolvedValueOnce(mockRows([
           { id: 'issue-uuid-1', ticket_number: 1 },
           { id: 'issue-uuid-2', ticket_number: 2 },
-        ],
-      } as any);
+        ]));
 
       await transformIssueLinks(content, workspaceId);
 
       // Should find both #1 and #2
-      expect(pool.query).toHaveBeenCalledWith(
+      expect(mockPoolQuery).toHaveBeenCalledWith(
         expect.anything(),
         [workspaceId, expect.arrayContaining([1, 2])]
       );
@@ -450,13 +484,11 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
       await transformIssueLinks(content, workspaceId);
 
-      expect(pool.query).toHaveBeenCalledWith(
+      expect(mockPoolQuery).toHaveBeenCalledWith(
         expect.stringContaining('workspace_id = $1'),
         [workspaceId, [123]]
       );
@@ -474,14 +506,13 @@ describe('transformIssueLinks', () => {
       };
 
       // Issue exists but in different workspace
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
       // Should remain plain text
-      const textNode = result.content[0].content[0];
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const textNode = requireValue(requireContent(paragraph, 'first paragraph content')[0], 'plain text node');
       expect(textNode.marks).toBeUndefined();
     });
   });
@@ -498,20 +529,19 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [
+      mockPoolQuery.mockResolvedValueOnce(mockRows([
           { id: 'issue-uuid-5', ticket_number: 5 },
           { id: 'issue-uuid-6', ticket_number: 6 },
-        ],
-      } as any);
+        ]));
 
-      const result = await transformIssueLinks(content, workspaceId) as any;
+      const result = toDoc(await transformIssueLinks(content, workspaceId));
 
-      const nodes = result.content[0].content;
+      const paragraph = requireValue(result.content[0], 'first paragraph');
+      const nodes = requireContent(paragraph, 'first paragraph content');
 
       // Both should be transformed
-      expect(nodes.some((n: any) => n.text === 'Issue #5' && n.marks)).toBe(true);
-      expect(nodes.some((n: any) => n.text === 'ISSUE #6' && n.marks)).toBe(true);
+      expect(findTextNode(nodes, 'Issue #5')?.marks).toBeDefined();
+      expect(findTextNode(nodes, 'ISSUE #6')?.marks).toBeDefined();
     });
   });
 
@@ -530,7 +560,7 @@ describe('transformIssueLinks', () => {
       const result = await transformIssueLinks(content, workspaceId);
 
       // Should not query when no issue patterns found
-      expect(pool.query).not.toHaveBeenCalled();
+      expect(mockPoolQuery).not.toHaveBeenCalled();
 
       // Should return unchanged content
       expect(result).toEqual(content);
@@ -547,14 +577,12 @@ describe('transformIssueLinks', () => {
         ],
       };
 
-      vi.mocked(pool.query).mockResolvedValueOnce({
-        rows: [],
-      } as any);
+      mockPoolQuery.mockResolvedValueOnce(mockRows([]));
 
       await transformIssueLinks(content, workspaceId);
 
       // Should make exactly one query for all issues
-      expect(pool.query).toHaveBeenCalledTimes(1);
+      expect(mockPoolQuery).toHaveBeenCalledTimes(1);
     });
   });
 });

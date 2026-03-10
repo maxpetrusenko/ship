@@ -1,17 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 
 // Mock pool before importing routes
+const { mockPoolQuery } = vi.hoisted(() => ({
+  mockPoolQuery: vi.fn(),
+}));
+
 vi.mock('../db/client.js', () => ({
   pool: {
-    query: vi.fn(),
+    query: mockPoolQuery,
   },
 }));
 
 // Mock auth middleware to inject test session data
 vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: (req: any, res: any, next: any) => {
+  authMiddleware: (req: Request, _res: Response, next: NextFunction) => {
     req.workspaceId = 'test-workspace-id';
     req.userId = 'test-user-id';
     next();
@@ -19,7 +23,10 @@ vi.mock('../middleware/auth.js', () => ({
 }));
 
 import activityRouter from '../routes/activity.js';
-import { pool } from '../db/client.js';
+
+function mockRows<Row extends object>(rows: Row[], rowCount = rows.length) {
+  return { rows, rowCount };
+}
 
 // Create test Express app
 function createTestApp() {
@@ -44,19 +51,14 @@ describe('Activity API', () => {
         const workspaceId = 'test-workspace-id';
 
         // Mock entity exists check
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: programId }],
-            rowCount: 1,
-          } as any)
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: programId }], 1))
           // Mock activity query
-          .mockResolvedValueOnce({
-            rows: [
+          .mockResolvedValueOnce(mockRows([
               { date: '2024-01-01', count: 5 },
               { date: '2024-01-02', count: 3 },
               { date: '2024-01-03', count: 0 },
-            ],
-          } as any);
+            ]));
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -71,7 +73,7 @@ describe('Activity API', () => {
         });
 
         // Verify entity check query
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining('SELECT id FROM documents'),
           [programId, workspaceId, 'program']
         );
@@ -81,17 +83,12 @@ describe('Activity API', () => {
         const projectId = 'project-456';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: projectId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: projectId }], 1))
+          .mockResolvedValueOnce(mockRows([
               { date: '2024-01-10', count: 12 },
               { date: '2024-01-11', count: 8 },
-            ],
-          } as any);
+            ]));
 
         const response = await request(app)
           .get(`/activity/project/${projectId}`)
@@ -104,7 +101,7 @@ describe('Activity API', () => {
           ],
         });
 
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining('SELECT id FROM documents'),
           [projectId, workspaceId, 'project']
         );
@@ -114,16 +111,11 @@ describe('Activity API', () => {
         const sprintId = 'sprint-789';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: sprintId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: sprintId }], 1))
+          .mockResolvedValueOnce(mockRows([
               { date: '2024-01-20', count: 15 },
-            ],
-          } as any);
+            ]));
 
         const response = await request(app)
           .get(`/activity/sprint/${sprintId}`)
@@ -135,7 +127,7 @@ describe('Activity API', () => {
           ],
         });
 
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining('SELECT id FROM documents'),
           [sprintId, workspaceId, 'sprint']
         );
@@ -144,14 +136,9 @@ describe('Activity API', () => {
       it('returns empty array for entity with no activity', async () => {
         const programId = 'empty-program';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: programId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [],
-          } as any);
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: programId }], 1))
+          .mockResolvedValueOnce(mockRows([]));
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -174,16 +161,13 @@ describe('Activity API', () => {
         });
 
         // Should not query database for invalid type
-        expect(pool.query).not.toHaveBeenCalled();
+        expect(mockPoolQuery).not.toHaveBeenCalled();
       });
 
       it('returns 404 when entity does not exist', async () => {
         const nonExistentId = 'non-existent-id';
 
-        vi.mocked(pool.query).mockResolvedValueOnce({
-          rows: [],
-          rowCount: 0,
-        } as any);
+        mockPoolQuery.mockResolvedValueOnce(mockRows([], 0));
 
         const response = await request(app)
           .get(`/activity/program/${nonExistentId}`)
@@ -198,10 +182,7 @@ describe('Activity API', () => {
         const programId = 'other-workspace-program';
 
         // Entity exists but not in user's workspace
-        vi.mocked(pool.query).mockResolvedValueOnce({
-          rows: [],
-          rowCount: 0,
-        } as any);
+        mockPoolQuery.mockResolvedValueOnce(mockRows([], 0));
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -215,7 +196,7 @@ describe('Activity API', () => {
       it('returns 500 on database error', async () => {
         const programId = 'program-error';
 
-        vi.mocked(pool.query).mockRejectedValueOnce(
+        mockPoolQuery.mockRejectedValueOnce(
           new Error('Database connection failed')
         );
 
@@ -234,27 +215,22 @@ describe('Activity API', () => {
         const programId = 'program-123';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: programId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [],
-          } as any);
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: programId }], 1))
+          .mockResolvedValueOnce(mockRows([]));
 
         await request(app)
           .get(`/activity/program/${programId}`)
           .expect(200);
 
         // Verify workspace_id is included in entity check
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining('workspace_id = $2'),
           [programId, workspaceId, 'program']
         );
 
         // Verify workspace_id is included in activity query
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining('WHERE workspace_id = $2'),
           [programId, workspaceId]
         );
@@ -265,17 +241,12 @@ describe('Activity API', () => {
       it('queries exactly 30 days of activity', async () => {
         const programId = 'program-123';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: programId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: Array.from({ length: 30 }, (_, i) => ({
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: programId }], 1))
+          .mockResolvedValueOnce(mockRows(Array.from({ length: 30 }, (_, i) => ({
               date: `2024-01-${String(i + 1).padStart(2, '0')}`,
               count: i % 3,
-            })),
-          } as any);
+            }))));
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -285,7 +256,7 @@ describe('Activity API', () => {
         expect(response.body.days).toHaveLength(30);
 
         // Verify query uses 29 days interval (today + 29 previous days = 30 total)
-        expect(pool.query).toHaveBeenCalledWith(
+        expect(mockPoolQuery).toHaveBeenCalledWith(
           expect.stringContaining("INTERVAL '29 days'"),
           [programId, 'test-workspace-id']
         );
@@ -296,20 +267,19 @@ describe('Activity API', () => {
       it('program query includes direct documents, projects, and sprints', async () => {
         const programId = 'program-123';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: programId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [],
-          } as any);
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: programId }], 1))
+          .mockResolvedValueOnce(mockRows([]));
 
         await request(app)
           .get(`/activity/program/${programId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = mockPoolQuery.mock.calls[1]?.[0];
+        expect(typeof activityQuery).toBe('string');
+        if (typeof activityQuery !== 'string') {
+          throw new Error('Expected activity query string');
+        }
 
         // Verify query structure includes all relevant associations via document_associations
         expect(activityQuery).toContain('program_projects');
@@ -323,20 +293,19 @@ describe('Activity API', () => {
       it('project query includes direct documents and sprints', async () => {
         const projectId = 'project-456';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: projectId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [],
-          } as any);
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: projectId }], 1))
+          .mockResolvedValueOnce(mockRows([]));
 
         await request(app)
           .get(`/activity/project/${projectId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = mockPoolQuery.mock.calls[1]?.[0];
+        expect(typeof activityQuery).toBe('string');
+        if (typeof activityQuery !== 'string') {
+          throw new Error('Expected activity query string');
+        }
 
         expect(activityQuery).toContain('project_sprints');
         // Project and sprint associations use document_associations junction table
@@ -348,20 +317,19 @@ describe('Activity API', () => {
       it('sprint query includes direct documents only', async () => {
         const sprintId = 'sprint-789';
 
-        vi.mocked(pool.query)
-          .mockResolvedValueOnce({
-            rows: [{ id: sprintId }],
-            rowCount: 1,
-          } as any)
-          .mockResolvedValueOnce({
-            rows: [],
-          } as any);
+        mockPoolQuery
+          .mockResolvedValueOnce(mockRows([{ id: sprintId }], 1))
+          .mockResolvedValueOnce(mockRows([]));
 
         await request(app)
           .get(`/activity/sprint/${sprintId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = mockPoolQuery.mock.calls[1]?.[0];
+        expect(typeof activityQuery).toBe('string');
+        if (typeof activityQuery !== 'string') {
+          throw new Error('Expected activity query string');
+        }
 
         // Issues linked via junction table
         expect(activityQuery).toContain('document_associations');
