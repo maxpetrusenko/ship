@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
+import { getCurrentWeekLabelClass } from '@/lib/weekHeaderStyles';
 import { createOrGetWeeklyDocumentId } from '@/lib/accountability';
 import { formatDateRange } from '@/lib/date-utils';
 import type { DocumentTabProps } from '@/lib/document-tabs';
@@ -308,7 +309,7 @@ export default function ProjectWeeksTab({ documentId }: DocumentTabProps) {
                     week.isCurrent && 'ring-1 ring-inset ring-accent/30'
                   )}
                 >
-                  <span className={cn('text-xs font-medium', week.isCurrent ? 'text-accent' : 'text-foreground')}>
+                  <span className={cn('text-xs font-medium', getCurrentWeekLabelClass(week.isCurrent))}>
                     {week.name}
                   </span>
                   <span className="text-[10px] text-muted">

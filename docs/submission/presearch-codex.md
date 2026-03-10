@@ -439,10 +439,12 @@ Observed index/query findings:
 
 #### Measurement Method
 
-- ran repo-root `pnpm test` three times
+- ran repo-root `pnpm test` three times; in this repo that script resolves to `pnpm --filter @ship/api test`, so the repeated-run evidence is API-only
 - captured structured JSON output for each run
 - ran API coverage with `vitest --coverage`
 - installed the missing `web/` coverage provider, then ran web coverage with `vitest --coverage`
+- reviewed the Playwright suite structure, fixtures, and isolation model from `e2e/`, `playwright.config.ts`, and `e2e/fixtures/isolated-env.ts`
+- later recorded a full current-state Playwright rerun under Docker with `--workers=1`; that result is captured separately in `docs/submission/e2e-verification-2026-03-09.md`
 
 Artifacts:
 - `/tmp/ship-api-test-1.json`
@@ -468,13 +470,23 @@ pnpm exec vitest run --coverage --reporter=json --outputFile=/tmp/ship-web-cov.j
 
 | Metric | Baseline |
 | --- | --- |
-| Total tests | `451` on stable runs |
-| Pass / Fail / Flaky | `451 / 0 / 23` |
-| Suite runtime | `2.43s`, `2.99s`, `1.69s` per JSON-reported run |
-| Run pattern | Run 1 green, Run 2 green, Run 3 flaky/failing |
+| Repo-root test script | `pnpm --filter @ship/api test` |
+| Total tests from repeated repo-root runs | `451` on stable API runs |
+| Pass / Fail / Flaky from repeated repo-root runs | `451 / 0 / 23` |
+| API suite runtime | `2.43s`, `2.99s`, `1.69s` per JSON-reported run |
+| Repeated-run pattern | Run 1 green, Run 2 green, Run 3 flaky/failing |
 | API coverage | `40.34%` statements, `33.44%` branch, `40.90%` functions, `40.52%` lines |
 | Web test run | `151` total, `138` passed, `13` failed |
 | Web coverage | `27.64%` statements, `19.39%` branch, `25.60%` functions, raw coverage map captured across `28` files |
+
+Later current-state full Playwright rerun (post-improvement verification):
+- `869` total tests
+- `862` passed
+- `1` failed
+- `6` flaky
+- total runtime: `27.7m`
+- environment: Docker Desktop required, `1` worker due constrained free RAM
+- detailed artifact: `docs/submission/e2e-verification-2026-03-09.md`
 
 Flaky failure set from run 3:
 - `auth.test.ts`
@@ -502,10 +514,12 @@ Critical flows with zero or effectively zero direct coverage:
 
 Important reliability finding:
 - API tests can mutate or clear the shared local dev DB, which directly interfered with live audit measurements during this session
+- the Playwright harness is isolation-heavy and memory-sensitive; the later full rerun confirmed Docker is a hard prerequisite and low-memory hosts may need `1` worker to avoid oversubscription failures
 
 #### Weaknesses or Opportunities Found
 
 - the suite is not deterministically green; the third run produced auth/weeks/backlinks failures that did not reproduce in runs 1 and 2
+- the package now contains a full browser-suite rerun, but that rerun still surfaced `1` hard failure and `6` flaky tests
 - realtime/collaboration, dashboard, team, and weekly-plan surfaces have weak API-side coverage
 - frontend coverage is now measurable, but the web suite is not fully green and coverage remains low
 
@@ -560,13 +574,24 @@ Regression proof:
 - `api/src/routes/documents-visibility.test.ts` covers overlong-title rejection plus script-like document create payload round-trip
 - `api/src/routes/standups.test.ts` covers empty-body standup creation plus script-like standup payload round-trip
 
-Error-boundary inventory:
-- explicit boundary usage exists only in `App.tsx` and one `Editor.tsx` subtree wrapper
-- route/page modules such as dashboard, issues, projects, team, and many document-tab components rely on the app-shell boundary rather than local route-scoped fallbacks
+Missing error boundaries or route-local fallbacks:
+
+| Location | Baseline finding |
+| --- | --- |
+| `web/src/pages/App.tsx` | app-shell `ErrorBoundary` exists, but it is coarse-grained for many route failures |
+| `web/src/components/Editor.tsx` | one local subtree boundary exists around the editor shell |
+| `web/src/pages/Dashboard.tsx` | no route-local fallback noted in the audit pass |
+| `web/src/pages/Issues.tsx` | no route-local fallback noted in the audit pass |
+| `web/src/pages/Projects.tsx` | no route-local fallback noted in the audit pass |
+| `web/src/pages/TeamMode.tsx` and `web/src/pages/TeamDirectory.tsx` | no route-local fallback noted in the audit pass |
+| `web/src/components/document-tabs/*` | many tab views relied on the surrounding app-shell boundary instead of local fallback UI |
 
 Silent failures identified:
-1. background `401` resource load appears in DevTools during normal usage without an obvious user-facing explanation
-2. repeated unsupported color-format warnings (`hsl(...)`) appear in the browser console for user presence colors
+
+| Issue | Reproduction steps | Baseline impact |
+| --- | --- | --- |
+| Background `401` resource load during normal usage | authenticate normally, navigate through the app, then inspect DevTools console or network while authenticated navigation continues | background auth/resource failure appears without an obvious user-facing explanation |
+| Unsupported presence-color format warning | open a collaborative document with live presence enabled, then inspect the browser console while presence colors render | repeated `hsl(...)` warnings add noise without a user-facing signal |
 
 #### Weaknesses or Opportunities Found
 
@@ -580,8 +605,8 @@ Silent failures identified:
 
 1. Medium: sparse boundary coverage means large UI sections can still fail as one unit
 2. Medium: browser-runtime hostile-input evidence is narrower than the server-side malformed-input coverage already documented
-2. Medium: background `401` noise is still present in normal browsing
-3. Low: offline and concurrent document editing passed in this local audit
+3. Medium: background `401` noise is still present in normal browsing
+4. Low: offline and concurrent document editing passed in this local audit
 
 ### Category 7: Accessibility Compliance
 
@@ -589,7 +614,7 @@ Silent failures identified:
 
 - ran Lighthouse accessibility audits on major pages
 - ran `axe-core` live on major pages
-- checked keyboard tab order on the login flow
+- recorded the keyboard evidence currently packaged for the major pages used in the accessibility pass
 - captured contrast-specific axe results
 - attempted a screen-reader-tree proxy via Playwright accessibility APIs; unavailable in this environment
 
@@ -628,7 +653,14 @@ Per-page axe highlights:
 - `team` -> `1` serious, `1` contrast node
 
 Keyboard:
-- login tab order pass: `Yes`
+
+| Page | Status | Notes |
+| --- | --- | --- |
+| `/login` | Full | login tab order was checked directly during the baseline pass |
+| `/issues` | Partial | no dedicated keyboard-only matrix was recorded in the baseline package |
+| `/team/allocation` | Partial | no dedicated keyboard-only matrix was recorded in the baseline package |
+| `/docs` | Partial | no dedicated keyboard-only matrix was recorded in the baseline package |
+| `/programs` | Partial | no dedicated keyboard-only matrix was recorded in the baseline package |
 
 Color contrast:
 - contrast nodes from axe:
@@ -710,8 +742,7 @@ Delta:
 
 What changed:
 - tightened internal JSON/Yjs typing in `api/src/utils/yjsConverter.ts`
-- replaced `extract*FromRow(row: any)` with route-local row types in `api/src/routes/weeks.ts`, `api/src/routes/issues.ts`, and `api/src/routes/programs.ts`
-- replaced several `params: any[]` / `values: any[]` placeholders with explicit SQL-value unions in `weeks.ts`, `issues.ts`, `programs.ts`, and `standups.ts`
+- reduced route-local `row: any` and SQL-value placeholder usage in the highest-density API files, especially `weeks.ts`, `issues.ts`, `programs.ts`, and `standups.ts`
 - replaced repeated `document.properties?.x as ...` reads in `web/src/pages/UnifiedDocumentPage.tsx` with typed property helpers
 - removed large volumes of loose `as any` and double-cast mocks from the highest-density API tests: `auth`, `accountability`, `activity`, `issues-history`, `projects`, and `transformIssueLinks`
 
@@ -722,7 +753,7 @@ Why the original code was suboptimal:
 - many API tests relied on broad mock casts instead of typed helpers, which both padded the unsafe surface and weakened test contracts
 
 Why this is better:
-- removed real `any` and `as` usage from high-traffic route code, a large frontend page, and the worst API test hotspots without changing behavior
+- reduced real `any` and `as` usage across high-traffic route code, a large frontend page, and the worst API test hotspots without changing behavior
 - final scoring now uses a syntax-aware count that matches actual TypeScript nodes instead of string heuristics
 - verification stayed green: `corepack pnpm --filter @ship/api type-check` passed and the touched API test set passed `88/88`
 
@@ -746,11 +777,11 @@ Before:
 - main entry chunk: `index-C2vAyoQ1.js` `2073.74 kB`, gzip `587.62 kB`
 
 After:
-- total production bundle: `4656 KB`
+- total production bundle: `4660 KB`
 - emitted asset files: `267`
-- entry chunk: `index-Bf6eYBaD.js` `968.95 kB`, gzip `262.37 kB`
-- lazy editor chunk: `Editor-jHs36z2A.js` `452.67 kB`, gzip `139.09 kB`
-- lazy emoji picker chunk: `emoji-picker-react.esm-X3mN0OTA.js` `271.11 kB`, gzip `63.98 kB`
+- entry chunk: `index-Dyodl9Xq.js` `970.30 kB`, gzip `262.80 kB`
+- lazy editor chunk: `Editor-7nH3VDtG.js` `452.79 kB`, gzip `139.15 kB`
+- lazy emoji picker chunk: `emoji-picker-react.esm-3WABrxNO.js` `271.11 kB`, gzip `63.98 kB`
 
 What changed:
 - lazy-loaded the main editor in `UnifiedEditor.tsx`
@@ -768,6 +799,7 @@ Why this is better:
 Tradeoffs:
 - more chunks emitted overall
 - Vite still warns about mixed static/dynamic imports around upload/editor paths
+- second verification rerun on `2026-03-10` landed slightly above the first improved rerun, but the entry payload reduction still remains far beyond the rubric target
 
 Target status:
 - `Met`
@@ -777,7 +809,7 @@ Target status:
 Benchmark environment:
 - isolated temp DB: `ship_audit_temp_20260309`
 - isolated API port: `3005`
-- seeded base data plus search-volume expansion to `5257` documents
+- seeded base data plus search-volume expansion to `5257` documents in the primary proof run
 - same query strings, same session auth, same hardware, same dataset before and after
 
 Before:
@@ -802,6 +834,10 @@ Why this is better:
 Tradeoffs:
 - extra GIN indexes increase write/storage cost
 - these claims are anchored to the isolated perf dataset, not the smaller default dev seed alone
+- second verification rerun on `2026-03-10` found `5259` documents in the isolated DB and kept the same search paths active:
+  - autocannon `1000 @ 50c`: `mentions` `P50 26 ms`, `P97.5 57 ms`, `P99 61 ms`; `learnings` `P50 2 ms`, `P97.5 8 ms`, `P99 8 ms`
+  - `/usr/sbin/ab` `1000 @ 50c`: `mentions` `P50 2 ms`, `P95 7 ms`, `P99 54 ms`; `learnings` `P50 3 ms`, `P95 5 ms`, `P99 6 ms`
+  - interpretation: `learnings` stayed clearly below baseline and `mentions` stayed materially below baseline at `P95`, but the second pass showed a heavier `P99` tail on `mentions`
 
 Target status:
 - `Met`
@@ -830,6 +866,9 @@ Why this is better:
 
 Tradeoffs:
 - the learnings query still leans on the broader active-doc index because its predicate mixes title, tags, and category conditions
+- second `EXPLAIN ANALYZE` rerun on `2026-03-10` still used the trigram indexes:
+  - person mention search: `Bitmap Index Scan on idx_documents_person_title_search` -> `Bitmap Heap Scan`, `2.419 ms`
+  - workspace document title search: `Bitmap Index Scan on idx_documents_title_search` -> `Bitmap Heap Scan`, `3.801 ms`
 
 Target status:
 - `Met`
@@ -837,14 +876,16 @@ Target status:
 ### Category 5: Test Coverage and Quality
 
 Before:
+- repo-root repeated-run evidence was API-only, because `pnpm test` maps to `pnpm --filter @ship/api test`
 - API suite had a `1 of 3` flaky run pattern
 - web suite under coverage: `151 total`, `138 passed`, `13 failed`
 - web coverage: `27.64%` statements, `19.39%` branch, `25.60%` functions
 
 After:
-- API suite: `451 / 451` passing on the latest verification run
-- web suite: `155 / 155` passing
+- API suite: `454 / 454` passing on the latest verification run
+- web suite: `164 / 164` passing
 - web coverage: `29.38%` statements, `20.96%` branch, `28.67%` functions, `30.40%` lines
+- full Playwright rerun on the improved branch: `862` passed, `1` failed, `6` flaky, `27.7m` total runtime under Docker with `--workers=1`
 
 What changed:
 - fixed `document-tabs` tests to match the current sprint/project/program tab contracts
@@ -858,13 +899,19 @@ Why the original code was suboptimal:
 Why this is better:
 - the suite is green again on the updated web paths
 - there are now explicit regression checks for sprint deep links, details-node structure, and transient session-extension failure
+- the package now includes a real full Playwright rerun instead of relying only on API repeated runs and separate web coverage
+- the improvement target is satisfied through three meaningful regression tests tied to real breakage, even though the full browser suite is not fully green
 
 Tradeoffs:
 - API-side collaboration/dashboard/team coverage is still weak
 - the web suite still emits React `act(...)` warnings even though it exits green
+- the latest full Playwright rerun still shows `1` hard failure and `6` flaky tests, so reliability debt remains visible even though the baseline evidence gap is closed
+- run-count note:
+  - Playwright full suite was recorded once under Docker after `2` environment-probe attempts that were blocked before execution by the missing container runtime
+  - detailed failing and flaky test list lives in `docs/submission/e2e-verification-2026-03-09.md`
 
 Target status:
-- `Met`
+- `Met via three meaningful regression tests; latest Playwright rerun still shows unresolved reliability debt`
 
 ### Category 6: Runtime Error and Edge Case Handling
 
@@ -923,33 +970,62 @@ Target status:
 
 ### Category 7: Accessibility Compliance
 
-After live headless axe rerun on the current app:
-- `/login` -> `0` critical/serious
-- `/issues` -> `0` critical/serious
-- `/team` -> `0` critical/serious
-- `/docs` -> `0` critical/serious
-- `/programs` -> `0` critical/serious
+Latest automated rerun on the seeded local app:
+- Lighthouse:
+  - `/login` -> `100`
+  - `/issues` -> `100`
+  - `/team` -> `100`
+  - `/docs` -> `100`
+  - `/programs` -> `100`
+- axe:
+  - `/login` -> `0` critical/serious
+  - `/issues` -> `0` critical/serious
+  - `/team` redirected to `/team/allocation` -> `0` critical/serious
+  - `/docs` -> `0` critical/serious
+  - `/programs` -> `0` critical/serious
+- keyboard-only rerun:
+
+| Page | Status | Notes |
+| --- | --- | --- |
+| `/login` | Full | email input auto-focused on load; `Tab` reached password then `Sign in`; no keyboard trap observed |
+| `/issues` | Full | skip link worked and moved focus into main issue content; issue detail/editor controls were reachable by keyboard |
+| `/team/allocation` | Full | skip link worked; team filter, week toggles, allocation chips, and assignment controls were reachable |
+| `/docs` | Full | skip link worked; search, sort, view toggle, new-document action, and document links were reachable |
+| `/programs` | Full | skip link worked; sort, customize-columns, new-program action, and grid rows were reachable |
+- rubric path used:
+  - requirements allow either `10+` Lighthouse gain on the lowest page or fixing all Critical/Serious violations on `3` important pages
+  - this category now closes on the second branch
+  - clean after pages: `/login`, `/issues`, `/docs`, `/team/allocation`, `/programs`
+- rerun history:
+  - second verification rerun on `2026-03-10` found `1` serious team/allocation contrast issue
+  - third verification rerun on `2026-03-10` after the contrast fix no longer reproduced that node
 
 What changed:
 - wrapped `LoginPage` loading and steady states in a real `<main>` landmark
 - added field-specific login validation alerts tied to `aria-describedby`
 - made the default render-crash fallback an announced alert instead of silent replacement UI
+- replaced raw current-week `text-accent` labels with a contrast-safe highlighted treatment across the audited week-header surfaces
+- added a dedicated keyboard-only rerun across the five audited pages
 
 Why the original code was suboptimal:
 - the login surface lacked the structural landmark expected by automated accessibility tooling
 - form errors were generic, so screen-reader users were not told which field to fix after an empty submit
 - section crashes could replace content without an assistive-technology announcement
+- the current-week accent label on `/team/allocation` used low-contrast text on the dark background
 
 Why this is better:
-- the earlier `login/docs/team` critical-or-serious axe findings no longer reproduce in the current live rerun
+- the earlier `login` and `docs` critical-or-serious axe findings no longer reproduce in the current live rerun
+- the earlier second-pass `/team/allocation` contrast violation no longer reproduces after the header-style fix
 - login error recovery is more explicit for keyboard and screen-reader users
 - crash fallback UI is now announced when a render boundary trips
+- the package now includes page-by-page keyboard evidence for all five audited routes instead of a partial matrix
 
 Tradeoffs:
 - direct screen-reader validation was completed with VoiceOver in Brave; broader browser or NVDA follow-up was not repeated in this session
+- keyboard proof is page-level and focused on primary navigation and controls, not an exhaustive control-by-control matrix for every possible state
 
 Target status:
-- `Met`
+- `Met via the alternative rubric branch: all Critical/Serious axe violations are cleared on 5 important pages, exceeding the 3-page requirement`
 
 Direct screen-reader validation:
 - tool: `VoiceOver`
@@ -1042,9 +1118,9 @@ Reflection:
 | 2. Bundle Size | Yes | Full baseline |
 | 3. API Response Time | Yes | Full baseline |
 | 4. DB Query Efficiency | Yes | Full baseline |
-| 5. Test Coverage | Yes | Full baseline, including package coverage |
+| 5. Test Coverage | Yes | API repeated runs, package coverage, and a full Playwright rerun are all recorded |
 | 6. Runtime Edge Cases | Yes | live runtime probes completed, including explicit empty-form, long-text, special-character, and HTML/script-injection coverage |
-| 7. Accessibility | Yes | automated reruns plus direct VoiceOver pass recorded |
+| 7. Accessibility | Yes | third rerun clears critical/serious axe findings on 5 key pages; dedicated keyboard matrix and VoiceOver pass are recorded |
 
 Remaining caveats:
 - Category 7 direct screen-reader validation was completed in one VoiceOver browser session; broader combinations were not rerun, but the required real screen-reader evidence is present

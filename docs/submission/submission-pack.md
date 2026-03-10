@@ -5,7 +5,10 @@ Date: 2026-03-09
 Status:
 - assembled
 - machine-verifiable artifacts complete
-- blocked only on manual or external deliverables
+- full Category 5 Playwright evidence is now packaged
+- one reliability caveat remains in Category 5
+- Category 7 now closes on the alternative accessibility rubric branch
+- manual or external deliverables still remain
 
 ## Core Files
 
@@ -17,6 +20,7 @@ Status:
 - screen-reader runbook: [`screen-reader-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/screen-reader-checklist.md)
 - social draft: [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
 - verification record: [`verification-record.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/verification-record.md)
+- full E2E verification run: [`e2e-verification-2026-03-09.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/e2e-verification-2026-03-09.md)
 - assignment requirements mirror: [`requirements.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/requirements.md)
 
 ## Evidence Snapshot
@@ -33,6 +37,11 @@ Ready now:
 - submission checklist
 - runtime screenshot artifact
 - final verification record
+- full Playwright E2E verification record
+
+Documented caveat:
+- Category 5 now includes a full Playwright rerun, but the latest recorded result still has `1` hard failure and `6` flaky tests
+- Category 7 evidence is page-level keyboard proof plus a VoiceOver pass, not a broader multi-browser screen-reader matrix
 
 Still manual or external:
 - public deployment URL

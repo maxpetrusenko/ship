@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
+import { getCurrentWeekLabelClass } from '@/lib/weekHeaderStyles';
 import { apiPost, apiGet } from '@/lib/api';
 import { formatDateRange } from '@/lib/date-utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -836,7 +837,7 @@ export function ReviewsPage() {
                       week.isCurrent && 'ring-1 ring-inset ring-accent/30'
                     )}
                   >
-                    <span className={cn('text-xs font-medium', week.isCurrent ? 'text-accent' : 'text-foreground')}>
+                    <span className={cn('text-xs font-medium', getCurrentWeekLabelClass(week.isCurrent))}>
                       {week.name}
                     </span>
                     <span className="text-[10px] text-muted">

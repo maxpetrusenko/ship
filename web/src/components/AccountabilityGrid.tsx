@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
+import { getCurrentWeekLabelClass } from '@/lib/weekHeaderStyles';
 import { formatDateRange } from '@/lib/date-utils';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
@@ -283,7 +284,7 @@ export function AccountabilityGrid({ showArchived = false }: AccountabilityGridP
                 >
                   <span className={cn(
                     'text-xs font-medium',
-                    sprint.isCurrent ? 'text-accent' : 'text-foreground'
+                    getCurrentWeekLabelClass(sprint.isCurrent)
                   )}>
                     {sprint.name}
                   </span>

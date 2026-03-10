@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { ProjectCombobox, Project } from '@/components/ProjectCombobox';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/cn';
+import { getCurrentWeekLabelClass } from '@/lib/weekHeaderStyles';
 import { apiPost, apiGet, apiDelete } from '@/lib/api';
 import { formatDateRange } from '@/lib/date-utils';
 
@@ -749,7 +750,7 @@ export function TeamModePage() {
                   >
                     <span className={cn(
                       'text-xs font-medium',
-                      sprint.isCurrent ? 'text-accent' : 'text-foreground'
+                      getCurrentWeekLabelClass(sprint.isCurrent)
                     )}>
                       {sprint.name}
                     </span>
@@ -957,4 +958,3 @@ function ViewAsIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-
