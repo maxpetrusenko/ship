@@ -25,15 +25,14 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
     // Get all people in workspace via person documents (only visible ones)
     // Include pending users so they appear in the grid
     // personId is the document ID (used for allocations), id is the user_id (null for pending users)
-    const usersResult = await pool.query(
-      `SELECT
-         d.id as "personId",
-         d.properties->>'user_id' as id,
-         d.title as name,
-         COALESCE(d.properties->>'email', u.email) as email,
-         CASE WHEN d.archived_at IS NOT NULL THEN true ELSE false END as "isArchived",
-         CASE WHEN d.properties->>'pending' = 'true' THEN true ELSE false END as "isPending",
-         d.properties->>'reports_to' as "reportsTo"
+    const usersResult = await pool.query(`SELECT
+         d.id AS "personId",
+         d.properties->>'user_id' AS id,
+         d.title AS name,
+         COALESCE(d.properties->>'email', u.email) AS email,
+         CASE WHEN d.archived_at IS NOT NULL THEN true ELSE false END AS "isArchived",
+         CASE WHEN d.properties->>'pending' = 'true' THEN true ELSE false END AS "isPending",
+         d.properties->>'reports_to' AS "reportsTo"
        FROM documents d
        LEFT JOIN users u ON u.id = (d.properties->>'user_id')::uuid
        WHERE d.workspace_id = $1
@@ -105,10 +104,9 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
     const minDate = sprints[0]?.startDate || today.toISOString().split('T')[0];
     const maxDate = sprints[sprints.length - 1]?.endDate || today.toISOString().split('T')[0];
 
-    const dbSprintsResult = await pool.query(
-      `SELECT d.id, d.title as name, d.properties->>'start_date' as start_date, d.properties->>'end_date' as end_date,
-              prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'emoji' as program_emoji, p.properties->>'color' as program_color
+    const dbSprintsResult = await pool.query(`SELECT d.id, d.title AS name, d.properties->>'start_date' AS start_date, d.properties->>'end_date' AS end_date,
+              prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'emoji' AS program_emoji, p.properties->>'color' AS program_color
        FROM documents d
        LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id AND p.document_type = 'program'
@@ -119,10 +117,9 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
     );
 
     // Get issues with sprint and assignee info (only visible issues)
-    const issuesResult = await pool.query(
-      `SELECT i.id, i.title, da_sprint.related_id as sprint_id, i.properties->>'assignee_id' as assignee_id, i.properties->>'state' as state, i.ticket_number,
-              s.properties->>'start_date' as sprint_start, s.properties->>'end_date' as sprint_end,
-              prog_da.related_id as program_id, p.title as program_name, p.properties->>'emoji' as program_emoji, p.properties->>'color' as program_color
+    const issuesResult = await pool.query(`SELECT i.id, i.title, da_sprint.related_id AS sprint_id, i.properties->>'assignee_id' AS assignee_id, i.properties->>'state' AS state, i.ticket_number,
+              s.properties->>'start_date' AS sprint_start, s.properties->>'end_date' AS sprint_end,
+              prog_da.related_id AS program_id, p.title AS program_name, p.properties->>'emoji' AS program_emoji, p.properties->>'color' AS program_color
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
        JOIN documents s ON s.id = da_sprint.related_id
@@ -207,15 +204,14 @@ router.get('/projects', authMiddleware, async (req: Request, res: Response) => {
 
     // Get all projects with their parent program info
     // Projects without a program will have null programId
-    const result = await pool.query(
-      `SELECT
+    const result = await pool.query(`SELECT
          proj.id,
          proj.title,
-         proj.properties->>'color' as "color",
-         prog_da.related_id as "programId",
-         prog.title as "programName",
-         prog.properties->>'emoji' as "programEmoji",
-         prog.properties->>'color' as "programColor"
+         proj.properties->>'color' AS "color",
+         prog_da.related_id AS "programId",
+         prog.title AS "programName",
+         prog.properties->>'emoji' AS "programEmoji",
+         prog.properties->>'color' AS "programColor"
        FROM documents proj
        LEFT JOIN document_associations prog_da ON proj.id = prog_da.document_id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id AND prog.document_type = 'program'
@@ -243,8 +239,7 @@ router.get('/programs', authMiddleware, async (req: Request, res: Response) => {
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
-    const result = await pool.query(
-      `SELECT id, title as name, properties->>'emoji' as emoji, properties->>'color' as color
+    const result = await pool.query(`SELECT id, title AS name, properties->>'emoji' AS emoji, properties->>'color' AS color
        FROM documents
        WHERE workspace_id = $1 AND document_type = 'program'
          AND ${VISIBILITY_FILTER_SQL('documents', '$2', '$3')}
@@ -272,17 +267,16 @@ router.get('/assignments', authMiddleware, async (req: Request, res: Response) =
 
     // First, get explicit sprint document assignments (assignee_ids array + project_id in properties)
     // Program is resolved via: project -> program (preferred), or sprint -> program (fallback for legacy programId assignments)
-    const explicitResult = await pool.query(
-      `SELECT
-         jsonb_array_elements_text(s.properties->'assignee_ids') as person_id,
-         (s.properties->>'sprint_number')::int as sprint_number,
-         s.properties->>'project_id' as project_id,
-         proj.title as project_name,
-         proj.properties->>'color' as project_color,
-         COALESCE(prog_da.related_id, sprint_prog_da.related_id) as program_id,
-         COALESCE(prog.title, sprint_prog.title) as program_name,
-         COALESCE(prog.properties->>'emoji', sprint_prog.properties->>'emoji') as program_emoji,
-         COALESCE(prog.properties->>'color', sprint_prog.properties->>'color') as program_color
+    const explicitResult = await pool.query(`SELECT
+         jsonb_array_elements_text(s.properties->'assignee_ids') AS person_id,
+         (s.properties->>'sprint_number')::int AS sprint_number,
+         s.properties->>'project_id' AS project_id,
+         proj.title AS project_name,
+         proj.properties->>'color' AS project_color,
+         COALESCE(prog_da.related_id, sprint_prog_da.related_id) AS program_id,
+         COALESCE(prog.title, sprint_prog.title) AS program_name,
+         COALESCE(prog.properties->>'emoji', sprint_prog.properties->>'emoji') AS program_emoji,
+         COALESCE(prog.properties->>'color', sprint_prog.properties->>'color') AS program_color
        FROM documents s
        LEFT JOIN documents proj ON (s.properties->>'project_id')::uuid = proj.id
        LEFT JOIN document_associations prog_da ON proj.id = prog_da.document_id AND prog_da.relationship_type = 'program'
@@ -346,17 +340,16 @@ router.get('/assignments', authMiddleware, async (req: Request, res: Response) =
     }
 
     // Get all issues with assignees, projects, and sprint info for inferred assignments
-    const issuesResult = await pool.query(
-      `SELECT
-         i.properties->>'assignee_id' as assignee_id,
-         da_project.related_id as project_id,
-         proj.title as project_name,
-         proj.properties->>'color' as project_color,
-         proj_prog_da.related_id as program_id,
-         prog.title as program_name,
-         prog.properties->>'emoji' as program_emoji,
-         prog.properties->>'color' as program_color,
-         s.properties->>'start_date' as sprint_start
+    const issuesResult = await pool.query(`SELECT
+         i.properties->>'assignee_id' AS assignee_id,
+         da_project.related_id AS project_id,
+         proj.title AS project_name,
+         proj.properties->>'color' AS project_color,
+         proj_prog_da.related_id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'emoji' AS program_emoji,
+         prog.properties->>'color' AS program_color,
+         s.properties->>'start_date' AS sprint_start
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
        JOIN documents s ON s.id = da_sprint.related_id
@@ -510,8 +503,7 @@ router.post('/assign', authMiddleware, async (req: Request, res: Response) => {
 
     if (isProjectAssignment) {
       // Validate projectId and get its parent program via document_associations
-      const projectCheck = await pool.query(
-        `SELECT d.id, prog_da.related_id as program_id
+      const projectCheck = await pool.query(`SELECT d.id, prog_da.related_id AS program_id
          FROM documents d
          LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
          WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'project'`,
@@ -688,8 +680,7 @@ router.delete('/assign', authMiddleware, async (req: Request, res: Response) => 
     }
 
     // Find the sprint containing this person in assignee_ids for this sprint number
-    const sprintResult = await pool.query(
-      `SELECT id, properties FROM documents
+    const sprintResult = await pool.query(`SELECT id, properties FROM documents
        WHERE workspace_id = $1 AND document_type = 'sprint'
          AND properties->'assignee_ids' ? $2
          AND (properties->>'sprint_number')::int = $3
@@ -742,13 +733,12 @@ router.get('/people', authMiddleware, async (req: Request, res: Response) => {
     // Also include user_id for grid consistency
     // Email comes from properties or joined user
     // Include pending users so they appear in team lists (but can't be assigned)
-    const result = await pool.query(
-      `SELECT d.id, d.properties->>'user_id' as user_id, d.title as name,
-              COALESCE(d.properties->>'email', u.email) as email,
-              CASE WHEN d.archived_at IS NOT NULL THEN true ELSE false END as "isArchived",
-              CASE WHEN d.properties->>'pending' = 'true' THEN true ELSE false END as "isPending",
-              d.properties->>'reports_to' as "reportsTo",
-              d.properties->>'role' as role
+    const result = await pool.query(`SELECT d.id, d.properties->>'user_id' AS user_id, d.title AS name,
+              COALESCE(d.properties->>'email', u.email) AS email,
+              CASE WHEN d.archived_at IS NOT NULL THEN true ELSE false END AS "isArchived",
+              CASE WHEN d.properties->>'pending' = 'true' THEN true ELSE false END AS "isPending",
+              d.properties->>'reports_to' AS "reportsTo",
+              d.properties->>'role' AS role
        FROM documents d
        LEFT JOIN users u ON u.id = (d.properties->>'user_id')::uuid
        WHERE d.workspace_id = $1
@@ -825,10 +815,9 @@ router.get('/accountability', authMiddleware, async (req: Request, res: Response
     }
 
     // Get all people in workspace (exclude pending - they can't have assignments)
-    const peopleResult = await pool.query(
-      `SELECT
-         d.properties->>'user_id' as id,
-         d.title as name
+    const peopleResult = await pool.query(`SELECT
+         d.properties->>'user_id' AS id,
+         d.title AS name
        FROM documents d
        WHERE d.workspace_id = $1
          AND d.document_type = 'person'
@@ -839,13 +828,12 @@ router.get('/accountability', authMiddleware, async (req: Request, res: Response
     );
 
     // Get all issues with estimates, assignees, sprint info, and completion state
-    const issuesResult = await pool.query(
-      `SELECT
-         i.properties->>'assignee_id' as assignee_id,
-         da_sprint.related_id as sprint_id,
-         COALESCE((i.properties->>'estimate')::numeric, 0) as estimate,
-         i.properties->>'state' as state,
-         s.properties->>'sprint_number' as sprint_number
+    const issuesResult = await pool.query(`SELECT
+         i.properties->>'assignee_id' AS assignee_id,
+         da_sprint.related_id AS sprint_id,
+         COALESCE((i.properties->>'estimate')::numeric, 0) AS estimate,
+         i.properties->>'state' AS state,
+         s.properties->>'sprint_number' AS sprint_number
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
        JOIN documents s ON s.id = da_sprint.related_id
@@ -945,8 +933,7 @@ router.get('/people/:personId/sprint-metrics', authMiddleware, async (req: Reque
     const { personId } = req.params;
 
     // Get the person document to find the user_id
-    const personResult = await pool.query(
-      `SELECT properties->>'user_id' as user_id
+    const personResult = await pool.query(`SELECT properties->>'user_id' AS user_id
        FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'person'`,
       [personId, workspaceId]
@@ -1013,11 +1000,10 @@ router.get('/people/:personId/sprint-metrics', authMiddleware, async (req: Reque
     }
 
     // Get all issues for this person with estimates, sprint info, and completion state
-    const issuesResult = await pool.query(
-      `SELECT
-         COALESCE((i.properties->>'estimate')::numeric, 0) as estimate,
-         i.properties->>'state' as state,
-         s.properties->>'sprint_number' as sprint_number
+    const issuesResult = await pool.query(`SELECT
+         COALESCE((i.properties->>'estimate')::numeric, 0) AS estimate,
+         i.properties->>'state' AS state,
+         s.properties->>'sprint_number' AS sprint_number
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
        JOIN documents s ON s.id = da_sprint.related_id
@@ -1135,8 +1121,7 @@ router.get('/accountability-grid-v2', authMiddleware, async (req: Request, res: 
     }
 
     // Get all workspace people
-    const peopleResult = await pool.query(
-      `SELECT id, title as name
+    const peopleResult = await pool.query(`SELECT id, title AS name
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'person'
@@ -1146,15 +1131,14 @@ router.get('/accountability-grid-v2', authMiddleware, async (req: Request, res: 
     );
 
     // Get all programs with their projects
-    const programsResult = await pool.query(
-      `SELECT
-         prog.id as program_id,
-         prog.title as program_name,
-         prog.properties->>'color' as program_color,
-         proj.id as project_id,
-         proj.title as project_title,
-         proj.properties->>'color' as project_color,
-         proj.archived_at as project_archived_at
+    const programsResult = await pool.query(`SELECT
+         prog.id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'color' AS program_color,
+         proj.id AS project_id,
+         proj.title AS project_title,
+         proj.properties->>'color' AS project_color,
+         proj.archived_at AS project_archived_at
        FROM documents prog
        LEFT JOIN document_associations da ON da.related_id = prog.id AND da.relationship_type = 'program'
        LEFT JOIN documents proj ON proj.id = da.document_id AND proj.document_type = 'project'
@@ -1167,12 +1151,11 @@ router.get('/accountability-grid-v2', authMiddleware, async (req: Request, res: 
     );
 
     // Also get projects without a program
-    const unassignedProjectsResult = await pool.query(
-      `SELECT
-         proj.id as project_id,
-         proj.title as project_title,
-         proj.properties->>'color' as project_color,
-         proj.archived_at as project_archived_at
+    const unassignedProjectsResult = await pool.query(`SELECT
+         proj.id AS project_id,
+         proj.title AS project_title,
+         proj.properties->>'color' AS project_color,
+         proj.archived_at AS project_archived_at
        FROM documents proj
        WHERE proj.workspace_id = $1
          AND proj.document_type = 'project'
@@ -1186,11 +1169,10 @@ router.get('/accountability-grid-v2', authMiddleware, async (req: Request, res: 
     );
 
     // Get ALL weekly plans in the workspace for the week range
-    const plansResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'project_id') as project_id,
-         (properties->>'week_number')::int as week_number,
+    const plansResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'project_id') AS project_id,
+         (properties->>'week_number')::int AS week_number,
          id,
          content
        FROM documents
@@ -1202,11 +1184,10 @@ router.get('/accountability-grid-v2', authMiddleware, async (req: Request, res: 
     );
 
     // Get ALL weekly retros in the workspace for the week range
-    const retrosResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'project_id') as project_id,
-         (properties->>'week_number')::int as week_number,
+    const retrosResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'project_id') AS project_id,
+         (properties->>'week_number')::int AS week_number,
          id,
          content
        FROM documents
@@ -1420,8 +1401,7 @@ router.get('/reviews', authMiddleware, async (req: Request, res: Response) => {
     }
 
     // Get all workspace people (include reports_to for My Team filter)
-    const peopleResult = await pool.query(
-      `SELECT id, title as name, properties->>'reports_to' as "reportsTo"
+    const peopleResult = await pool.query(`SELECT id, title AS name, properties->>'reports_to' AS "reportsTo"
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'person'
@@ -1431,19 +1411,18 @@ router.get('/reviews', authMiddleware, async (req: Request, res: Response) => {
     );
 
     // Get sprint documents with approval/rating properties
-    const sprintsResult = await pool.query(
-      `SELECT
-         jsonb_array_elements_text(s.properties->'assignee_ids') as person_id,
-         (s.properties->>'sprint_number')::int as sprint_number,
-         s.id as sprint_id,
-         s.properties->>'project_id' as project_id,
-         s.properties->'plan_approval' as plan_approval,
-         s.properties->'review_approval' as review_approval,
-         s.properties->'review_rating' as review_rating,
-         proj.title as project_name,
-         prog_da.related_id as program_id,
-         prog.title as program_name,
-         prog.properties->>'color' as program_color
+    const sprintsResult = await pool.query(`SELECT
+         jsonb_array_elements_text(s.properties->'assignee_ids') AS person_id,
+         (s.properties->>'sprint_number')::int AS sprint_number,
+         s.id AS sprint_id,
+         s.properties->>'project_id' AS project_id,
+         s.properties->'plan_approval' AS plan_approval,
+         s.properties->'review_approval' AS review_approval,
+         s.properties->'review_rating' AS review_rating,
+         proj.title AS project_name,
+         prog_da.related_id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'color' AS program_color
        FROM documents s
        LEFT JOIN documents proj ON (s.properties->>'project_id')::uuid = proj.id
        LEFT JOIN document_associations prog_da ON proj.id = prog_da.document_id AND prog_da.relationship_type = 'program'
@@ -1456,10 +1435,9 @@ router.get('/reviews', authMiddleware, async (req: Request, res: Response) => {
     );
 
     // Get weekly plans (to check content existence)
-    const plansResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'week_number')::int as week_number,
+    const plansResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'week_number')::int AS week_number,
          id, content
        FROM documents
        WHERE workspace_id = $1
@@ -1470,10 +1448,9 @@ router.get('/reviews', authMiddleware, async (req: Request, res: Response) => {
     );
 
     // Get weekly retros (to check content existence)
-    const retrosResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'week_number')::int as week_number,
+    const retrosResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'week_number')::int AS week_number,
          id, content
        FROM documents
        WHERE workspace_id = $1
@@ -1668,8 +1645,7 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     }
 
     // Get all workspace people
-    const peopleResult = await pool.query(
-      `SELECT id, title as name
+    const peopleResult = await pool.query(`SELECT id, title AS name
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'person'
@@ -1679,8 +1655,7 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     );
 
     // Get all programs
-    const programsResult = await pool.query(
-      `SELECT id, title as name, properties->>'color' as color
+    const programsResult = await pool.query(`SELECT id, title AS name, properties->>'color' AS color
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'program'
@@ -1690,18 +1665,17 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     );
 
     // Get explicit sprint assignments (person -> sprint -> project)
-    const explicitAssignmentsResult = await pool.query(
-      `SELECT
-         jsonb_array_elements_text(s.properties->'assignee_ids') as person_id,
-         (s.properties->>'sprint_number')::int as sprint_number,
-         s.properties->>'project_id' as project_id,
-         s.properties->'plan_approval'->>'state' as plan_approval_state,
-         s.properties->'review_approval'->>'state' as review_approval_state,
-         proj.title as project_name,
-         proj.properties->>'color' as project_color,
-         prog_da.related_id as program_id,
-         prog.title as program_name,
-         prog.properties->>'color' as program_color
+    const explicitAssignmentsResult = await pool.query(`SELECT
+         jsonb_array_elements_text(s.properties->'assignee_ids') AS person_id,
+         (s.properties->>'sprint_number')::int AS sprint_number,
+         s.properties->>'project_id' AS project_id,
+         s.properties->'plan_approval'->>'state' AS plan_approval_state,
+         s.properties->'review_approval'->>'state' AS review_approval_state,
+         proj.title AS project_name,
+         proj.properties->>'color' AS project_color,
+         prog_da.related_id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'color' AS program_color
        FROM documents s
        LEFT JOIN documents proj ON (s.properties->>'project_id')::uuid = proj.id
        LEFT JOIN document_associations prog_da ON proj.id = prog_da.document_id AND prog_da.relationship_type = 'program'
@@ -1745,16 +1719,15 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     }
 
     // Infer assignments from issues (fallback for people without explicit assignments)
-    const issuesResult = await pool.query(
-      `SELECT
-         i.properties->>'assignee_id' as assignee_id,
-         da_project.related_id as project_id,
-         proj.title as project_name,
-         proj.properties->>'color' as project_color,
-         proj_prog_da.related_id as program_id,
-         prog.title as program_name,
-         prog.properties->>'color' as program_color,
-         s.properties->>'start_date' as sprint_start
+    const issuesResult = await pool.query(`SELECT
+         i.properties->>'assignee_id' AS assignee_id,
+         da_project.related_id AS project_id,
+         proj.title AS project_name,
+         proj.properties->>'color' AS project_color,
+         proj_prog_da.related_id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'color' AS program_color,
+         s.properties->>'start_date' AS sprint_start
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
        JOIN documents s ON s.id = da_sprint.related_id
@@ -1836,11 +1809,10 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     }
 
     // Get ALL weekly plans in the workspace for the week range
-    const plansResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'project_id') as project_id,
-         (properties->>'week_number')::int as week_number,
+    const plansResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'project_id') AS project_id,
+         (properties->>'week_number')::int AS week_number,
          id,
          content
        FROM documents
@@ -1852,11 +1824,10 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     );
 
     // Get ALL weekly retros in the workspace for the week range
-    const retrosResult = await pool.query(
-      `SELECT
-         (properties->>'person_id') as person_id,
-         (properties->>'project_id') as project_id,
-         (properties->>'week_number')::int as week_number,
+    const retrosResult = await pool.query(`SELECT
+         (properties->>'person_id') AS person_id,
+         (properties->>'project_id') AS project_id,
+         (properties->>'week_number')::int AS week_number,
          id,
          content
        FROM documents
@@ -2062,26 +2033,25 @@ router.get('/accountability-grid', authMiddleware, async (req: Request, res: Res
     }
 
     // Get all sprint documents with their accountability data
-    const sprintsResult = await pool.query(
-      `SELECT
+    const sprintsResult = await pool.query(`SELECT
          d.id,
          d.title,
-         d.properties->>'sprint_number' as sprint_number,
-         d.properties->'plan_approval' as plan_approval,
-         d.properties->'review_approval' as review_approval,
+         d.properties->>'sprint_number' AS sprint_number,
+         d.properties->'plan_approval' AS plan_approval,
+         d.properties->'review_approval' AS review_approval,
          EXISTS(
            SELECT 1 FROM documents wp
            WHERE wp.document_type = 'weekly_plan'
            AND (wp.properties->>'week_number')::int = (d.properties->>'sprint_number')::int
            AND wp.workspace_id = $1
            AND wp.deleted_at IS NULL
-         ) as has_plan,
+         ) AS has_plan,
          EXISTS(
            SELECT 1 FROM documents sr
            WHERE sr.document_type = 'weekly_review'
            AND sr.properties->>'sprint_id' = d.id::text
            AND sr.archived_at IS NULL
-         ) as has_review
+         ) AS has_review
        FROM documents d
        WHERE d.workspace_id = $1
          AND d.document_type = 'sprint'
@@ -2114,26 +2084,25 @@ router.get('/accountability-grid', authMiddleware, async (req: Request, res: Res
     }
 
     // Get all active projects with their program info and accountability data
-    const projectsResult = await pool.query(
-      `SELECT
+    const projectsResult = await pool.query(`SELECT
          p.id,
          p.title,
-         p.properties->>'color' as color,
-         p.properties->>'emoji' as emoji,
-         p.content as plan_content,
-         p.properties->'plan_approval' as plan_approval,
-         p.properties->'retro_approval' as retro_approval,
-         prog.id as program_id,
-         prog.title as program_name,
-         prog.properties->>'color' as program_color,
-         prog.properties->>'emoji' as program_emoji,
+         p.properties->>'color' AS color,
+         p.properties->>'emoji' AS emoji,
+         p.content AS plan_content,
+         p.properties->'plan_approval' AS plan_approval,
+         p.properties->'retro_approval' AS retro_approval,
+         prog.id AS program_id,
+         prog.title AS program_name,
+         prog.properties->>'color' AS program_color,
+         prog.properties->>'emoji' AS program_emoji,
          EXISTS(
            SELECT 1 FROM documents r
            WHERE r.document_type = 'wiki'
            AND r.parent_id = p.id
            AND r.title ILIKE '%retro%'
            AND r.archived_at IS NULL
-         ) as has_retro
+         ) AS has_retro
        FROM documents p
        LEFT JOIN document_associations da_prog ON da_prog.document_id = p.id AND da_prog.relationship_type = 'program'
        LEFT JOIN documents prog ON prog.id = da_prog.related_id

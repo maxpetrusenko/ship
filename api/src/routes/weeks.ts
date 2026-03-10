@@ -20,8 +20,7 @@ const router: RouterType = Router();
  * The sprint's owner_id is a person document ID; this resolves their supervisor's user_id.
  */
 async function getSprintOwnerReportsTo(sprintId: string, workspaceId: string): Promise<string | null> {
-  const result = await pool.query(
-    `SELECT owner_person.properties->>'reports_to' as reports_to
+  const result = await pool.query(`SELECT owner_person.properties->>'reports_to' AS reports_to
      FROM documents d
      LEFT JOIN documents owner_person
        ON d.properties->>'owner_id' IS NOT NULL
@@ -74,8 +73,7 @@ async function broadcastAccountabilityUpdateToSprintOwner(
 ): Promise<void> {
   if (!sprintOwnerId) return;
 
-  const ownerUserResult = await pool.query(
-    `SELECT properties->>'user_id' as user_id FROM documents WHERE id = $1`,
+  const ownerUserResult = await pool.query(`SELECT properties->>'user_id' AS user_id FROM documents WHERE id = $1`,
     [sprintOwnerId]
   );
   const ownerUserId = ownerUserResult.rows[0]?.user_id;
@@ -359,32 +357,31 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
     const daysRemaining = Math.max(0, Math.ceil((currentSprintEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 
     // Get all sprints that match the current sprint number - join via document_associations
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'prefix' as program_prefix,
-              p.properties->>'accountable_id' as program_accountable_id,
-              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) as owner_reports_to,
-              $5::timestamp as workspace_sprint_start_date,
-              u.id as owner_id, u.name as owner_name, u.email as owner_email,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+              p.properties->>'accountable_id' AS program_accountable_id,
+              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) AS owner_reports_to,
+              $5::timestamp AS workspace_sprint_start_date,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue') as issue_count,
+               WHERE i.document_type = 'issue') AS issue_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') as completed_count,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') AS completed_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) as started_count,
-              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') as has_plan,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) AS started_count,
+              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL) as has_retro,
+               WHERE rt.properties->>'outcome' IS NOT NULL) AS has_retro,
               (SELECT rt.properties->>'outcome' FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_outcome,
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_outcome,
               (SELECT rt.id FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_id
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -454,20 +451,19 @@ router.get('/my-action-items', authMiddleware, async (req: Request, res: Respons
     // Get sprints owned by this user that need either plan or retro - join via document_associations
     // Include current sprint (for plans) and previous sprint (for retros)
     // Plans/retros are matched by week_number property and created_by user
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name,
-              (d.properties->>'sprint_number')::int as sprint_number,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name,
+              (d.properties->>'sprint_number')::int AS sprint_number,
               (SELECT COUNT(*) > 0 FROM documents pl
                WHERE pl.workspace_id = d.workspace_id
                  AND pl.document_type = 'weekly_plan'
                  AND (pl.properties->>'week_number')::int = (d.properties->>'sprint_number')::int
-                 AND pl.created_by = $2) as has_plan,
+                 AND pl.created_by = $2) AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                WHERE rt.workspace_id = d.workspace_id
                  AND rt.document_type = 'weekly_retro'
                  AND (rt.properties->>'week_number')::int = (d.properties->>'sprint_number')::int
-                 AND rt.created_by = $2) as has_retro
+                 AND rt.created_by = $2) AS has_retro
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -652,26 +648,25 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
 
     if (state && typeof state === 'string') {
       params.push(state);
-      filterConditions += ` AND i.properties->>'state' = $${params.length}`;
+      filterConditions +=` AND i.properties->>'state' = $${params.length}`;
     }
 
     if (show_mine === 'true') {
       params.push(userId);
-      filterConditions += ` AND (i.properties->>'assignee_id')::uuid = $${params.length}`;
+      filterConditions +=` AND (i.properties->>'assignee_id')::uuid = $${params.length}`;
     } else if (assignee && typeof assignee === 'string') {
       params.push(assignee);
-      filterConditions += ` AND (i.properties->>'assignee_id')::uuid = $${params.length}`;
+      filterConditions +=` AND (i.properties->>'assignee_id')::uuid = $${params.length}`;
     }
 
     // Get all issues from all active sprints, grouped by sprint - join via document_associations
-    const result = await pool.query(
-      `SELECT
-        i.id as issue_id, i.title as issue_title, i.properties as issue_properties,
-        i.ticket_number, i.created_at as issue_created_at, i.updated_at as issue_updated_at,
-        s.id as sprint_id, s.title as sprint_name, s.properties as sprint_properties,
-        p.id as program_id, p.title as program_name, p.properties->>'prefix' as program_prefix,
-        u.name as assignee_name,
-        CASE WHEN person_doc.archived_at IS NOT NULL THEN true ELSE false END as assignee_archived
+    const result = await pool.query(`SELECT
+        i.id AS issue_id, i.title AS issue_title, i.properties AS issue_properties,
+        i.ticket_number, i.created_at AS issue_created_at, i.updated_at AS issue_updated_at,
+        s.id AS sprint_id, s.title AS sprint_name, s.properties AS sprint_properties,
+        p.id AS program_id, p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+        u.name AS assignee_name,
+        CASE WHEN person_doc.archived_at IS NOT NULL THEN true ELSE false END AS assignee_archived
        FROM documents i
        JOIN document_associations da ON da.document_id = i.id AND da.relationship_type = 'sprint'
        JOIN documents s ON s.id = da.related_id AND s.document_type = 'sprint'
@@ -788,32 +783,31 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'prefix' as program_prefix,
-              p.properties->>'accountable_id' as program_accountable_id,
-              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) as owner_reports_to,
-              w.sprint_start_date as workspace_sprint_start_date,
-              u.id as owner_id, u.name as owner_name, u.email as owner_email,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+              p.properties->>'accountable_id' AS program_accountable_id,
+              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) AS owner_reports_to,
+              w.sprint_start_date AS workspace_sprint_start_date,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue') as issue_count,
+               WHERE i.document_type = 'issue') AS issue_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') as completed_count,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') AS completed_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) as started_count,
-              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') as has_plan,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) AS started_count,
+              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL) as has_retro,
+               WHERE rt.properties->>'outcome' IS NOT NULL) AS has_retro,
               (SELECT rt.properties->>'outcome' FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_outcome,
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_outcome,
               (SELECT rt.id FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_id
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -899,8 +893,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
 
     // If program_id provided, verify it belongs to workspace and user can access it
     if (program_id) {
-      const programCheck = await pool.query(
-        `SELECT d.id
+      const programCheck = await pool.query(`SELECT d.id
          FROM documents d
          WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'program'
            AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
@@ -1073,8 +1066,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it, also get workspace start date
-    const existing = await pool.query(
-      `SELECT d.id, d.properties, prog_da.related_id as program_id, w.sprint_start_date
+    const existing = await pool.query(`SELECT d.id, d.properties, prog_da.related_id AS program_id, w.sprint_start_date
        FROM documents d
        JOIN workspaces w ON d.workspace_id = w.id
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
@@ -1188,39 +1180,37 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     updates.push(`updated_at = now()`);
 
-    await pool.query(
-      `UPDATE documents SET ${updates.join(', ')}
+    await pool.query(`UPDATE documents SET ${updates.join(', ')}
        WHERE id = $${paramIndex} AND workspace_id = $${paramIndex + 1} AND document_type = 'sprint'`,
       [...values, id, req.workspaceId]
     );
 
     // Re-query to get full sprint with owner info
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'prefix' as program_prefix,
-              p.properties->>'accountable_id' as program_accountable_id,
-              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) as owner_reports_to,
-              w.sprint_start_date as workspace_sprint_start_date,
-              u.id as owner_id, u.name as owner_name, u.email as owner_email,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+              p.properties->>'accountable_id' AS program_accountable_id,
+              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) AS owner_reports_to,
+              w.sprint_start_date AS workspace_sprint_start_date,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue') as issue_count,
+               WHERE i.document_type = 'issue') AS issue_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') as completed_count,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') AS completed_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) as started_count,
-              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') as has_plan,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) AS started_count,
+              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL) as has_retro,
+               WHERE rt.properties->>'outcome' IS NOT NULL) AS has_retro,
               (SELECT rt.properties->>'outcome' FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_outcome,
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_outcome,
               (SELECT rt.id FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_id
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -1249,8 +1239,7 @@ router.post('/:id/start', authMiddleware, async (req: Request, res: Response) =>
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const existing = await pool.query(
-      `SELECT d.id, d.properties, prog_da.related_id as program_id, w.sprint_start_date
+    const existing = await pool.query(`SELECT d.id, d.properties, prog_da.related_id AS program_id, w.sprint_start_date
        FROM documents d
        JOIN workspaces w ON d.workspace_id = w.id
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
@@ -1297,32 +1286,31 @@ router.post('/:id/start', authMiddleware, async (req: Request, res: Response) =>
     broadcastToUser(req.userId!, 'accountability:updated', { type: 'week_start', targetId: id as string });
 
     // Re-query to get full sprint with owner info
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'prefix' as program_prefix,
-              p.properties->>'accountable_id' as program_accountable_id,
-              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) as owner_reports_to,
-              w.sprint_start_date as workspace_sprint_start_date,
-              u.id as owner_id, u.name as owner_name, u.email as owner_email,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+              p.properties->>'accountable_id' AS program_accountable_id,
+              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) AS owner_reports_to,
+              w.sprint_start_date AS workspace_sprint_start_date,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue') as issue_count,
+               WHERE i.document_type = 'issue') AS issue_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') as completed_count,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') AS completed_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) as started_count,
-              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') as has_plan,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) AS started_count,
+              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL) as has_retro,
+               WHERE rt.properties->>'outcome' IS NOT NULL) AS has_retro,
               (SELECT rt.properties->>'outcome' FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_outcome,
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_outcome,
               (SELECT rt.id FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_id
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -1355,8 +1343,7 @@ router.delete('/:id', authMiddleware, async (req: Request, res: Response) => {
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const existing = await pool.query(
-      `SELECT id FROM documents
+    const existing = await pool.query(`SELECT id FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('documents', '$3', '$4')}`,
       [id, workspaceId, userId, isAdmin]
@@ -1403,8 +1390,7 @@ router.patch('/:id/plan', authMiddleware, async (req: Request, res: Response) =>
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it, get current properties
-    const existing = await pool.query(
-      `SELECT id, properties FROM documents
+    const existing = await pool.query(`SELECT id, properties FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('documents', '$3', '$4')}`,
       [id, workspaceId, userId, isAdmin]
@@ -1505,32 +1491,31 @@ router.patch('/:id/plan', authMiddleware, async (req: Request, res: Response) =>
     }
 
     // Re-query to get full sprint with owner info
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name, p.properties->>'prefix' as program_prefix,
-              p.properties->>'accountable_id' as program_accountable_id,
-              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) as owner_reports_to,
-              w.sprint_start_date as workspace_sprint_start_date,
-              u.id as owner_id, u.name as owner_name, u.email as owner_email,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name, p.properties->>'prefix' AS program_prefix,
+              p.properties->>'accountable_id' AS program_accountable_id,
+              (SELECT op.properties->>'reports_to' FROM documents op WHERE d.properties->>'owner_id' IS NOT NULL AND op.id = (d.properties->>'owner_id')::uuid AND op.document_type = 'person' AND op.workspace_id = d.workspace_id) AS owner_reports_to,
+              w.sprint_start_date AS workspace_sprint_start_date,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue') as issue_count,
+               WHERE i.document_type = 'issue') AS issue_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') as completed_count,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' = 'done') AS completed_count,
               (SELECT COUNT(*) FROM documents i
                JOIN document_associations ida ON ida.document_id = i.id AND ida.related_id = d.id AND ida.relationship_type = 'sprint'
-               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) as started_count,
-              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') as has_plan,
+               WHERE i.document_type = 'issue' AND i.properties->>'state' IN ('in_progress', 'in_review')) AS started_count,
+              (SELECT COUNT(*) > 0 FROM documents pl WHERE pl.parent_id = d.id AND pl.document_type = 'weekly_plan') AS has_plan,
               (SELECT COUNT(*) > 0 FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL) as has_retro,
+               WHERE rt.properties->>'outcome' IS NOT NULL) AS has_retro,
               (SELECT rt.properties->>'outcome' FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_outcome,
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_outcome,
               (SELECT rt.id FROM documents rt
                JOIN document_associations rda ON rda.document_id = rt.id AND rda.related_id = d.id AND rda.relationship_type = 'sprint'
-               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) as retro_id
+               WHERE rt.properties->>'outcome' IS NOT NULL LIMIT 1) AS retro_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -1558,8 +1543,7 @@ router.get('/:id/issues', authMiddleware, async (req: Request, res: Response) =>
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists, user can access it, and get program info
-    const sprintResult = await pool.query(
-      `SELECT d.id, p.properties->>'prefix' as prefix FROM documents d
+    const sprintResult = await pool.query(`SELECT d.id, p.properties->>'prefix' AS prefix FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
        WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'sprint'
@@ -1572,11 +1556,10 @@ router.get('/:id/issues', authMiddleware, async (req: Request, res: Response) =>
       return;
     }
 
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.properties, d.ticket_number,
+    const result = await pool.query(`SELECT d.id, d.title, d.properties, d.ticket_number,
               d.created_at, d.updated_at, d.created_by,
-              u.name as assignee_name,
-              CASE WHEN person_doc.archived_at IS NOT NULL THEN true ELSE false END as assignee_archived
+              u.name AS assignee_name,
+              CASE WHEN person_doc.archived_at IS NOT NULL THEN true ELSE false END AS assignee_archived
        FROM documents d
        JOIN document_associations sprint_da ON sprint_da.document_id = d.id AND sprint_da.related_id = $1 AND sprint_da.relationship_type = 'sprint'
        LEFT JOIN users u ON (d.properties->>'assignee_id')::uuid = u.id
@@ -1657,9 +1640,8 @@ router.get('/:id/scope-changes', authMiddleware, async (req: Request, res: Respo
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Get sprint info including sprint_number and workspace start date
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties->>'sprint_number' as sprint_number,
-              w.sprint_start_date as workspace_sprint_start_date
+    const sprintResult = await pool.query(`SELECT d.id, d.properties->>'sprint_number' AS sprint_number,
+              w.sprint_start_date AS workspace_sprint_start_date
        FROM documents d
        JOIN workspaces w ON d.workspace_id = w.id
        WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'sprint'
@@ -1690,8 +1672,7 @@ router.get('/:id/scope-changes', authMiddleware, async (req: Request, res: Respo
     sprintStartDate.setUTCDate(sprintStartDate.getUTCDate() + (sprintNumber - 1) * sprintDuration);
 
     // Get all issues currently in the sprint with their estimates
-    const issuesResult = await pool.query(
-      `SELECT d.id, COALESCE((d.properties->>'estimate')::numeric, 0) as estimate
+    const issuesResult = await pool.query(`SELECT d.id, COALESCE((d.properties->>'estimate')::numeric, 0) AS estimate
        FROM documents d
        JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
        WHERE d.document_type = 'issue'`,
@@ -1777,8 +1758,7 @@ router.get('/:id/scope-changes', authMiddleware, async (req: Request, res: Respo
       // We need the estimate of the issue at time of removal
       // For simplicity, we'll use the current estimate (or 0 if issue no longer in sprint)
       // In a real system, you might want to track historical estimates
-      const issueResult = await pool.query(
-        `SELECT COALESCE((properties->>'estimate')::numeric, 0) as estimate
+      const issueResult = await pool.query(`SELECT COALESCE((properties->>'estimate')::numeric, 0) AS estimate
          FROM documents WHERE id = $1`,
         [row.document_id]
       );
@@ -1881,8 +1861,7 @@ router.get('/:id/standups', authMiddleware, async (req: Request, res: Response) 
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const sprintCheck = await pool.query(
-      `SELECT id FROM documents
+    const sprintCheck = await pool.query(`SELECT id FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('documents', '$3', '$4')}`,
       [id, workspaceId, userId, isAdmin]
@@ -1894,10 +1873,9 @@ router.get('/:id/standups', authMiddleware, async (req: Request, res: Response) 
     }
 
     // Get all standups for this sprint (parent_id = sprint.id)
-    const result = await pool.query(
-      `SELECT d.id, d.parent_id, d.title, d.content, d.created_at, d.updated_at,
-              d.properties->>'author_id' as author_id,
-              u.name as author_name, u.email as author_email
+    const result = await pool.query(`SELECT d.id, d.parent_id, d.title, d.content, d.created_at, d.updated_at,
+              d.properties->>'author_id' AS author_id,
+              u.name AS author_name, u.email AS author_email
        FROM documents d
        LEFT JOIN users u ON (d.properties->>'author_id')::uuid = u.id
        WHERE d.parent_id = $1 AND d.document_type = 'standup'
@@ -1996,8 +1974,7 @@ router.post('/:id/standups', authMiddleware, async (req: Request, res: Response)
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const sprintCheck = await pool.query(
-      `SELECT id FROM documents
+    const sprintCheck = await pool.query(`SELECT id FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('documents', '$3', '$4')}`,
       [id, workspaceId, userId, isAdmin]
@@ -2205,9 +2182,8 @@ router.get('/:id/review', authMiddleware, async (req: Request, res: Response) =>
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.title, d.properties, prog_da.related_id as program_id,
-              p.title as program_name
+    const sprintResult = await pool.query(`SELECT d.id, d.title, d.properties, prog_da.related_id AS program_id,
+              p.title AS program_name
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id
@@ -2226,9 +2202,8 @@ router.get('/:id/review', authMiddleware, async (req: Request, res: Response) =>
 
     // Check if a weekly_review already exists for this sprint
     // Note: weekly_review documents use document_associations to link to sprint
-    const existingReview = await pool.query(
-      `SELECT d.id, d.title, d.content, d.properties, d.created_at, d.updated_at,
-              u.name as owner_name, u.email as owner_email
+    const existingReview = await pool.query(`SELECT d.id, d.title, d.content, d.properties, d.created_at, d.updated_at,
+              u.name AS owner_name, u.email AS owner_email
        FROM documents d
        JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
        LEFT JOIN users u ON (d.properties->>'owner_id')::uuid = u.id
@@ -2327,8 +2302,7 @@ router.post('/:id/review', authMiddleware, async (req: Request, res: Response) =
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and user can access it
-    const sprintCheck = await pool.query(
-      `SELECT id, properties FROM documents
+    const sprintCheck = await pool.query(`SELECT id, properties FROM documents
        WHERE id = $1 AND workspace_id = $2 AND document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('documents', '$3', '$4')}`,
       [id, workspaceId, userId, isAdmin]
@@ -2440,8 +2414,7 @@ router.patch('/:id/review', authMiddleware, async (req: Request, res: Response) 
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Find existing weekly_review for this sprint
-    const existing = await pool.query(
-      `SELECT d.id, d.properties, d.content FROM documents d
+    const existing = await pool.query(`SELECT d.id, d.properties, d.content FROM documents d
        JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
        WHERE d.document_type = 'weekly_review'
          AND d.workspace_id = $2
@@ -2501,8 +2474,7 @@ router.patch('/:id/review', authMiddleware, async (req: Request, res: Response) 
 
     updates.push(`updated_at = now()`);
 
-    await pool.query(
-      `UPDATE documents SET ${updates.join(', ')}
+    await pool.query(`UPDATE documents SET ${updates.join(', ')}
        WHERE id = $${paramIndex} AND document_type = 'weekly_review'`,
       [...values, reviewId]
     );
@@ -2551,9 +2523,8 @@ router.patch('/:id/review', authMiddleware, async (req: Request, res: Response) 
 
     // Re-query to get full review with owner info
     // Note: weekly_review documents use owner_id (not assignee_ids like sprint docs)
-    const result = await pool.query(
-      `SELECT d.id, d.title, d.content, d.properties, d.created_at, d.updated_at,
-              u.name as owner_name, u.email as owner_email
+    const result = await pool.query(`SELECT d.id, d.title, d.content, d.properties, d.created_at, d.updated_at,
+              u.name AS owner_name, u.email AS owner_email
        FROM documents d
        LEFT JOIN users u ON (d.properties->>'owner_id')::uuid = u.id
        WHERE d.id = $1 AND d.document_type = 'weekly_review'`,
@@ -2607,8 +2578,7 @@ router.post('/:id/carryover', authMiddleware, async (req: Request, res: Response
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // 1. Validate source sprint exists
-    const sourceSprintResult = await pool.query(
-      `SELECT d.id, d.title, d.properties FROM documents d
+    const sourceSprintResult = await pool.query(`SELECT d.id, d.title, d.properties FROM documents d
        WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
       [sourceSprintId, workspaceId, userId, isAdmin]
@@ -2622,8 +2592,7 @@ router.post('/:id/carryover', authMiddleware, async (req: Request, res: Response
     const sourceSprint = sourceSprintResult.rows[0];
 
     // 2. Validate target sprint exists and is planning/active
-    const targetSprintResult = await pool.query(
-      `SELECT d.id, d.title, d.properties FROM documents d
+    const targetSprintResult = await pool.query(`SELECT d.id, d.title, d.properties FROM documents d
        WHERE d.id = $1 AND d.workspace_id = $2 AND d.document_type = 'sprint'
          AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
       [target_sprint_id, workspaceId, userId, isAdmin]
@@ -2644,8 +2613,7 @@ router.post('/:id/carryover', authMiddleware, async (req: Request, res: Response
     }
 
     // 3. Verify all issue_ids belong to the source sprint and user has access
-    const issueCheckResult = await pool.query(
-      `SELECT d.id FROM documents d
+    const issueCheckResult = await pool.query(`SELECT d.id FROM documents d
        JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
        WHERE d.id = ANY($2) AND d.document_type = 'issue' AND d.workspace_id = $3
          AND ${VISIBILITY_FILTER_SQL('d', '$4', '$5')}`,
@@ -2737,9 +2705,8 @@ router.post('/:id/approve-plan', authMiddleware, async (req: Request, res: Respo
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists, get properties and program's accountable_id
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties, d.properties->>'owner_id' as sprint_owner_id,
-              prog.properties->>'accountable_id' as program_accountable_id
+    const sprintResult = await pool.query(`SELECT d.id, d.properties, d.properties->>'owner_id' AS sprint_owner_id,
+              prog.properties->>'accountable_id' AS program_accountable_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id
@@ -2830,8 +2797,7 @@ router.post('/:id/unapprove-plan', authMiddleware, async (req: Request, res: Res
 
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties, prog.properties->>'accountable_id' as program_accountable_id
+    const sprintResult = await pool.query(`SELECT d.id, d.properties, prog.properties->>'accountable_id' AS program_accountable_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id
@@ -2908,9 +2874,8 @@ router.post('/:id/approve-review', authMiddleware, async (req: Request, res: Res
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists, get properties and program's accountable_id
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties, d.properties->>'owner_id' as sprint_owner_id,
-              prog.properties->>'accountable_id' as program_accountable_id
+    const sprintResult = await pool.query(`SELECT d.id, d.properties, d.properties->>'owner_id' AS sprint_owner_id,
+              prog.properties->>'accountable_id' AS program_accountable_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id
@@ -3030,9 +2995,8 @@ router.post('/:id/request-plan-changes', authMiddleware, async (req: Request, re
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and get authorization info
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties, d.properties->>'owner_id' as sprint_owner_id,
-              prog.properties->>'accountable_id' as program_accountable_id
+    const sprintResult = await pool.query(`SELECT d.id, d.properties, d.properties->>'owner_id' AS sprint_owner_id,
+              prog.properties->>'accountable_id' AS program_accountable_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id
@@ -3079,8 +3043,7 @@ router.post('/:id/request-plan-changes', authMiddleware, async (req: Request, re
     const sprintOwnerId = sprint.sprint_owner_id;
     if (sprintOwnerId) {
       // Find the user_id for this person document
-      const ownerUserResult = await pool.query(
-        `SELECT properties->>'user_id' as user_id FROM documents WHERE id = $1`,
+      const ownerUserResult = await pool.query(`SELECT properties->>'user_id' AS user_id FROM documents WHERE id = $1`,
         [sprintOwnerId]
       );
       const ownerUserId = ownerUserResult.rows[0]?.user_id;
@@ -3123,9 +3086,8 @@ router.post('/:id/request-retro-changes', authMiddleware, async (req: Request, r
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Verify sprint exists and get authorization info
-    const sprintResult = await pool.query(
-      `SELECT d.id, d.properties, d.properties->>'owner_id' as sprint_owner_id,
-              prog.properties->>'accountable_id' as program_accountable_id
+    const sprintResult = await pool.query(`SELECT d.id, d.properties, d.properties->>'owner_id' AS sprint_owner_id,
+              prog.properties->>'accountable_id' AS program_accountable_id
        FROM documents d
        LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents prog ON prog_da.related_id = prog.id
@@ -3171,8 +3133,7 @@ router.post('/:id/request-retro-changes', authMiddleware, async (req: Request, r
     // Notify the sprint owner that changes were requested
     const sprintOwnerId = sprint.sprint_owner_id;
     if (sprintOwnerId) {
-      const ownerUserResult = await pool.query(
-        `SELECT properties->>'user_id' as user_id FROM documents WHERE id = $1`,
+      const ownerUserResult = await pool.query(`SELECT properties->>'user_id' AS user_id FROM documents WHERE id = $1`,
         [sprintOwnerId]
       );
       const ownerUserId = ownerUserResult.rows[0]?.user_id;

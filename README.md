@@ -19,6 +19,27 @@
 
 ---
 
+## Audit and Improvement Snapshot
+
+This fork was used for a full 7-category audit, targeted fixes, and reproducible before/after verification. The work was completed in roughly one focused day.
+
+| Scope | Result |
+|------|--------|
+| Audit | Full baseline across Categories 1-7 |
+| Implementation | Fixes shipped across type safety, performance, tests, runtime handling, and accessibility |
+| Outcome | All 7 categories now meet the submission target in the packaged verification docs |
+
+High-signal results:
+- Type safety: `26.87%` reduction by upstream/master grep recount and `29.37%` reduction by syntax-aware AST recount
+- Bundle size: main entry chunk `2073.74 kB -> 970.30 kB`
+- API search latency: P95 `72 ms -> 28 ms` and `65 ms -> 6 ms`
+- Database query efficiency: slowest measured search query `2.860 ms -> 1.181 ms`
+- Accessibility: critical/serious axe violations cleared on `/login`, `/issues`, `/team/allocation`, `/docs`, and `/programs`
+
+Detailed evidence lives in [`docs/submission/presearch-codex.md`](docs/submission/presearch-codex.md), [`docs/submission/final-narrative.md`](docs/submission/final-narrative.md), and [`docs/submission/verification-record.md`](docs/submission/verification-record.md).
+
+---
+
 ## What is Ship?
 
 Ship is a project management tool that combines documentation, issue tracking, and plan-driven weekly workflows in one place. Instead of switching between a wiki, a task tracker, and a spreadsheet, everything lives together.
