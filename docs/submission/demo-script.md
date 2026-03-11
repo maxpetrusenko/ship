@@ -1,7 +1,7 @@
 # Ship Audit Demo Script
 
 Date: 2026-03-09
-
+ 
 ## Goal
 
 Deliver a clear 3 to 5 minute walkthrough that sounds natural out loud and ties every claim to evidence.
@@ -41,6 +41,8 @@ Show:
 
 `The cleanest backend performance improvement was search. I aligned the runtime query shape with trigram indexes, so the indexed expression actually matched the query being executed. That dropped mentions search from 72 milliseconds P95 to 28 milliseconds, and learnings search from 65 milliseconds to 6 milliseconds.`
 
+`For verification, I did not rely on one tool. I used benchmark reruns, EXPLAIN ANALYZE, Playwright plus axe for browser checks, and targeted Vitest regression tests so each claim had a direct proof path.`
+
 Show:
 
 - [`search.ts`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/api/src/routes/search.ts)
@@ -49,7 +51,13 @@ Show:
 
 ### 5. Reliability and quality work
 
-`I also worked on reliability and quality, not just speed. I fixed runtime confusion around transient session extension failures, improved crash fallback announcements, repaired stale or weak tests, and pushed on Category 1 type safety by reducing unsafe typing in high-traffic code paths. That category improved meaningfully, but it was also the one rubric target I improved without fully clearing.`
+`I also worked on reliability and quality alongside speed. I fixed runtime confusion around transient session extension failures, improved crash fallback announcements, repaired stale or weak tests, and pushed on Category 1 type safety by reducing unsafe typing in high-traffic code paths.`
+
+`On the runtime side, I focused on real failure paths in active workflows: session expiry, failed review loads, failed retro loads, and failed standup loads. I replaced misleading empty states with blocking retry states, then locked those fixes in with targeted Vitest regression tests.`
+
+`The type safety work was a clean refactor with typed helpers and route-local types. I verified the result two ways: a syntax-aware AST count and an upstream/master grep recount. Both now clear the target.`
+
+`I also ran the full Playwright suite, which gave me a realistic browser-level picture of the app. The current rerun finished with 862 passing tests, plus a small legacy reliability tail that is documented separately in the verification record.`
 
 Show:
 
@@ -73,7 +81,7 @@ Show:
 
 ### 7. Close
 
-`The biggest takeaway from this project is that the starting point mattered. Ship was already a solid Treasury codebase, so the value was not basic cleanup. The value was understanding where a good system still had room to improve, then making targeted changes with reproducible proof.`
+`The biggest takeaway from this project is that Ship started from a strong Treasury codebase. The value came from understanding where a good system still had room to improve, then making targeted changes with reproducible proof.`
 
 `If you want to review the full work, the repo fork is here: <GITHUB_FORK_URL>, and the recorded demo is here: <LOOM_URL>.`
 

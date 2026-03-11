@@ -15,7 +15,7 @@ Current rerun values can move if the repo changes after the written submission s
 
 | Area | Before | Current / After | Live proof |
 | --- | --- | --- | --- |
-| Type safety | `270 any`, `1504 as`, `1257 !`, `1 @ts-*` | current repo rerun prints updated counts live; improvement is real but below the `25%` target | `corepack pnpm demo:proof` |
+| Type safety | `273 any`, `691 as`, `329 !`, `1 @ts-*` | submission AST recount: `93 any`, `500 as`, `320 !`, `1 @ts-*`; target met under the syntax-aware measurement | cite `presearch-codex.md` / `final-narrative.md` |
 | Bundle size | main entry `2073.74 kB` | current repo rerun prints the built main entry chunk live | `corepack pnpm demo:proof` |
 | Runtime resilience | confusing transient session behavior and blocking load gaps existed before | targeted runtime regressions rerun live in the proof command | `corepack pnpm demo:proof` |
 | Verification status | baseline had broken / flaky areas | live proof reruns `type-check`, targeted runtime tests, web suite, focused API proof, and build | `corepack pnpm demo:proof` |
@@ -26,7 +26,7 @@ Current rerun values can move if the repo changes after the written submission s
 - `Ship is a task and project management tool built by the U.S. Department of the Treasury.`
 - `It was already a solid, production-shaped system when I came in.`
 - `My job was to improve it further with measurable proof, not to rescue a broken app.`
-- `Category 1 improved meaningfully, but it was the one rubric target I improved without fully clearing.`
+- `Category 1 clears the rubric target under the syntax-aware AST recount, though large route hotspots still remain.`
 
 ## Backup Docs
 

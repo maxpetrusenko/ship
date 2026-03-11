@@ -113,3 +113,19 @@ vendor/
 
 # Vite PWA dev artifacts
 web/dev-dist/
+
+# Coverage reports
+coverage/
+api/coverage/
+web/coverage/
+
+# Local binaries
+.local-bin/
+
+# Local env
+.env.hostinger
+
+# Scratch counters
+count-ts-simple.js
+count-ts-tsc.js
+count-type-safety.js

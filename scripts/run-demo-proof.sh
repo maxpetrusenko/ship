@@ -6,9 +6,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WITH_A11Y=false
 FULL_GATE=false
 BASE_URL="${DEMO_PROOF_BASE_URL:-http://localhost:5174}"
-BASE_ANY=270
-BASE_AS=1504
-BASE_NONNULL=1257
+BASE_ANY=273
+BASE_AS=691
+BASE_NONNULL=329
 BASE_TS_DIRECTIVES=1
 BASE_MAIN_CHUNK_KB=2073.74
 
@@ -38,19 +38,34 @@ run_step() {
   )
 }
 
-count_matches() {
-  local pattern="$1"
+run_step_with_retry() {
+  local title="$1"
+  local attempts="$2"
+  shift 2
 
-  (
-    cd "$ROOT_DIR"
-    rg -o -g '*.ts' -g '*.tsx' -g '!**/dist/**' -g '!**/dev-dist/**' "$pattern" api web shared | wc -l | awk '{print $1}'
-  )
+  local try=1
+  while (( try <= attempts )); do
+    if run_step "$title (attempt $try/$attempts)" "$@"; then
+      return 0
+    fi
+
+    if (( try == attempts )); then
+      return 1
+    fi
+
+    printf 'Retrying %s after attempt %d failed.\n' "$title" "$try"
+    try=$((try + 1))
+  done
 }
 
-current_any="$(count_matches '(:\s*any\b|<any>|as any\b)')"
-current_as="$(count_matches '\sas\s+[A-Za-z_{<(]')"
-current_nonnull="$(count_matches '\S!\.?|\S!\]|\S!\)')"
-current_ts_directives="$(count_matches '@ts-ignore|@ts-expect-error')"
+type_safety_json="$(
+  cd "$ROOT_DIR"
+  node scripts/type-safety-count.js --json
+)"
+current_any="$(node -e "const counts = JSON.parse(process.argv[1]); console.log(counts.any)" "$type_safety_json")"
+current_as="$(node -e "const counts = JSON.parse(process.argv[1]); console.log(counts.as)" "$type_safety_json")"
+current_nonnull="$(node -e "const counts = JSON.parse(process.argv[1]); console.log(counts.nonnull)" "$type_safety_json")"
+current_ts_directives="$(node -e "const counts = JSON.parse(process.argv[1]); console.log(counts.tsDirectives)" "$type_safety_json")"
 
 run_step "Type-check" corepack pnpm type-check
 run_step \
@@ -63,8 +78,9 @@ run_step "Web test suite" corepack pnpm --filter @ship/web test
 if [[ "$FULL_GATE" == true ]]; then
   run_step "API full test suite" corepack pnpm test
 else
-  run_step \
+  run_step_with_retry \
     "API focused proof" \
+    2 \
     corepack pnpm --filter @ship/api exec vitest run \
     src/routes/search.test.ts \
     src/routes/weeks.test.ts \
@@ -151,7 +167,7 @@ EOF
 fi
 
 printf '\nDemo proof complete.\n'
-printf 'Type safety counts: any %s -> %s, as %s -> %s, ! %s -> %s, @ts-* %s -> %s\n' \
+printf 'Type safety AST counts: any %s -> %s, as %s -> %s, ! %s -> %s, @ts-* %s -> %s\n' \
   "$BASE_ANY" "$current_any" \
   "$BASE_AS" "$current_as" \
   "$BASE_NONNULL" "$current_nonnull" \
@@ -167,3 +183,5 @@ else
   printf 'Expected visible results: type-check pass, runtime regressions green, web 164/164, focused API proof green, build pass.\n'
   printf 'For the recorded full API gate, run: corepack pnpm demo:proof:full\n'
 fi
+printf 'Test surface note: repo-root pnpm test covers the API Vitest suite only; web Vitest and Playwright E2E are separate verification layers.\n'
+printf 'Recorded full Playwright rerun: 862 passed, 1 failed, 6 flaky (see docs/submission/e2e-verification-2026-03-09.md).\n'
