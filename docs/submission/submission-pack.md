@@ -13,6 +13,8 @@ Status:
 ## Core Files
 
 - audit and improvement doc: [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
+- baseline audit split-out: [`Phase_1_Audit.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_1_Audit.md)
+- executive improvement brief: [`Phase_2_Improvement_Brief.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_2_Improvement_Brief.md)
 - merged final narrative: [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 - demo script: [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
 - submission checklist: [`submission-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/submission-checklist.md)
@@ -69,6 +71,9 @@ Current status:
 Primary file:
 - [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 
+Split view:
+- [`Phase_1_Audit.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_1_Audit.md)
+
 Optional hardening:
 - add deploy, fork, and branch metadata once the remote packaging work is done
 
@@ -76,6 +81,7 @@ Optional hardening:
 
 Primary files:
 - [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
+- [`Phase_2_Improvement_Brief.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_2_Improvement_Brief.md)
 - [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 
 Still needed:
