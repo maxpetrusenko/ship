@@ -206,4 +206,4 @@ Use this framing:
 
 Before this doc can be treated as final-final submission copy:
 - sync any future screen-reader findings into `docs/presearch-codex.md`
-- confirm deployed URL and fork/branch names
+- social post is live at `https://x.com/petrusenko_max/status/2033316618852307091`

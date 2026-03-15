@@ -15,8 +15,10 @@ Status:
 - audit and improvement doc: [`presearch-codex.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/presearch-codex.md)
 - baseline audit split-out: [`Phase_1_Audit.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_1_Audit.md)
 - executive improvement brief: [`Phase_2_Improvement_Brief.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase_2_Improvement_Brief.md)
+- short Phase 2 brief: [`Phase2_short.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/Phase2_short.md)
 - merged final narrative: [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 - demo script: [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
+- short demo script: [`demo-script-short.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script-short.md)
 - submission checklist: [`submission-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/submission-checklist.md)
 - blocker list: [`delivery-blockers.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/delivery-blockers.md)
 - screen-reader runbook: [`screen-reader-checklist.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/screen-reader-checklist.md)
@@ -46,10 +48,7 @@ Documented caveat:
 - Category 7 evidence is page-level keyboard proof plus a VoiceOver pass, not a broader multi-browser screen-reader matrix
 
 Still manual or external:
-- public deployment URL
-- fork remote plus final branch names
-- recorded demo artifact
-- published social link
+- none
 
 ## Required Submission Slots
 
@@ -62,9 +61,9 @@ Need:
 
 Current status:
 - fork URL: `https://github.com/maxpetrusenko/ship`
-- pushed branch: `chore/submission-package`
+- pushed branches: `master`, `chore/submission-package`
 - fork default branch updated: `master`
-- no fork-specific setup delta documented yet
+- no fork-specific setup delta; upstream README applies as-is
 
 ### 2. Audit Report
 
@@ -85,7 +84,7 @@ Primary files:
 - [`final-narrative.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/final-narrative.md)
 
 Still needed:
-- deploy and fork metadata inserts
+- none
 
 ### 4. Discovery Write-up
 
@@ -98,7 +97,7 @@ Script ready in:
 - [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
 
 Current status:
-- manual-only after recording
+- Loom walkthrough: `https://www.loom.com/share/f3a8fefa8f6e475097e48f7f89f2a9dd`
 
 ### 6. AI Cost Analysis
 
@@ -108,7 +107,7 @@ Ready in:
 ### 7. Deployed Application
 
 Current status:
-- manual-only after deploy
+- live at `https://ship.187.77.7.226.sslip.io/docs`
 
 ### 8. Social Post
 
@@ -116,15 +115,13 @@ Draft ready in:
 - [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
 
 Current status:
-- manual-only after publication
+- published at `https://x.com/petrusenko_max/status/2033316618852307091`
 
 ## Final Assembly Order
 
-1. add fork, branch, and deploy details
-2. record demo
-3. publish social post
+1. final submit
 
 ## Handoff Notes
 
 If work resumes later, start here:
-- fill deploy, git, video, and social metadata
+- final package handoff or any optional polish

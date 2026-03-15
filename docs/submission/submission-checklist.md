@@ -20,18 +20,15 @@ Turn the current local audit package into the literal final submission required 
 | Social post draft | Done | `social-post-draft.md` |
 | Manual blocker list | Done | `delivery-blockers.md` |
 | Screen-reader runbook | Done | `screen-reader-checklist.md` |
-| Forked repo packaging | Partial | local repo changes exist; remote/branch packaging still manual |
-| Public deployment | Partial | infra path exists; public deploy still manual |
-| Demo video recording | Partial | script exists; recording still manual |
-| Social publication | Partial | draft exists; post still manual |
+| Forked repo packaging | Done | fork `https://github.com/maxpetrusenko/ship`; branches `master` and `chore/submission-package` are recorded |
+| Public deployment | Done | deployed at `https://ship.187.77.7.226.sslip.io/docs` |
+| Demo video recording | Done | Loom walkthrough: `https://www.loom.com/share/f3a8fefa8f6e475097e48f7f89f2a9dd` |
+| Social publication | Done | published at `https://x.com/petrusenko_max/status/2033316618852307091` |
 | Submission pack | Done | `docs/submission-pack.md` |
 
 ## Manual Finish Order
 
-1. Create or configure your fork remote and push the implementation branches.
-2. Deploy the improved fork publicly.
-3. Record the 3 to 5 minute walkthrough using `demo-script.md`.
-4. Publish one social draft from `social-post-draft.md`.
+1. Final submit.
 
 ## Hard-Gate Check
 
@@ -39,6 +36,7 @@ Before calling the submission complete, confirm:
 
 - the deployed app URL is included in the submission package
 - the fork/branch names are included in the submission package
+- the Loom/demo video URL is included in the submission package
 - Category 5 wording still matches the actual packaged evidence
 - Category 7 wording explicitly uses the alternative rubric branch and matches the clean post-fix axe rerun plus keyboard evidence
 

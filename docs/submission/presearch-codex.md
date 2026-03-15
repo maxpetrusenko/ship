@@ -1136,16 +1136,16 @@ Submission package status:
 
 | Deliverable | Status | Evidence / Notes |
 | --- | --- | --- |
-| Forked repo with improvements on labeled branches | Partial | local worktree updated; fork remote / branch packaging still manual |
-| Setup guide in README | Partial | repo README exists, but this submission package does not yet include a fork-specific setup delta |
+| Forked repo with improvements on labeled branches | Yes | fork at `https://github.com/maxpetrusenko/ship`; pushed branches `master` and `chore/submission-package` |
+| Setup guide in README | Yes | no fork-specific setup delta; upstream README applies as-is |
 | Audit report with 7-category methodology and raw data | Yes | raw data present; Cat 1 now clears the target under both syntax-aware and upstream/master grep recounts |
 | Improvement documentation with before/after proof | Yes | Phase 2 sections include before/after measurements and reproducible commands |
 | Final merged narrative | Yes | prepared in `docs/final-narrative.md` |
 | Discovery write-up | Yes | Phase 3 section completed |
-| Demo video | Partial | script drafted in `demo-script.md`; recording still manual |
+| Demo video | Yes | recorded walkthrough: `https://www.loom.com/share/f3a8fefa8f6e475097e48f7f89f2a9dd` |
 | AI cost analysis | Yes | included above from `ShipShape/docs/agent-usage.md` |
-| Deployed improved fork | Partial | deployment path documented, but public deploy was not completed in this session |
-| Social post | Partial | draft prepared in `social-post-draft.md`; publication still manual |
+| Deployed improved fork | Yes | live at `https://ship.187.77.7.226.sslip.io/docs` |
+| Social post | Yes | published at `https://x.com/petrusenko_max/status/2033316618852307091` |
 | Verification record | Yes | prepared in `docs/verification-record.md` |
 | Submission pack | Yes | prepared in `docs/submission-pack.md` |
 
@@ -1154,4 +1154,4 @@ Literal completion status:
 - Phase 2 implementation write-up: completed in this document
 - Phase 3 discoveries + AI cost analysis: completed in this document
 - final integration docs are assembled and verified locally
-- remaining work is now concentrated in manual deliverables and external deployment packaging
+- submission package now includes the published social post URL

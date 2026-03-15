@@ -17,47 +17,14 @@ Date: 2026-03-09
 
 ## Still Requires Manual or External Action
 
-### 1. Public deployment
+- none
 
-Why blocked:
+## Closed External Items
 
-- fork now exists at `https://github.com/maxpetrusenko/ship`
-- local repo now has both `upstream` and `origin`
-- deployment scripts target AWS infrastructure and need cloud credentials plus environment config
-
-Local evidence:
-
-- current fork branch pushed:
+- live deploy: `https://ship.187.77.7.226.sslip.io/docs`
+- recorded demo: `https://www.loom.com/share/f3a8fefa8f6e475097e48f7f89f2a9dd`
+- published social post: `https://x.com/petrusenko_max/status/2033316618852307091`
+- fork: `https://github.com/maxpetrusenko/ship`
+- pushed branches:
   - `origin/master`
   - `origin/chore/submission-package`
-
-Needed to close:
-
-- choose deploy target
-- provide AWS credentials / env or an alternate hosting path
-
-### 2. Recorded demo video
-
-Why blocked:
-
-- I can draft the script locally, but cannot produce the final recorded artifact inside this repo
-
-Needed to close:
-
-- record the walkthrough using [`demo-script.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/demo-script.md)
-
-### 3. Social post publication
-
-Why blocked:
-
-- draft can be prepared locally, but posting requires your account/session
-
-Needed to close:
-
-- post one of the drafts in [`social-post-draft.md`](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/docs/submission/social-post-draft.md)
-
-## Recommended Next Order
-
-1. choose deployment target and deploy
-2. record demo video
-3. publish social post
