@@ -1,4 +1,5 @@
-import { test, expect, Page } from './fixtures/isolated-env'
+import { test, expect, Page } from "./fixtures/isolated-env";
+import { waitForDocumentEditor } from "./fixtures/test-helpers";
 
 /**
  * Emoji Picker E2E Tests
@@ -8,323 +9,277 @@ import { test, expect, Page } from './fixtures/isolated-env'
 
 // Helper to login before each test
 async function login(page: Page) {
-  await page.goto('/login')
-  await page.locator('#email').fill('dev@ship.local')
-  await page.locator('#password').fill('admin123')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page).not.toHaveURL('/login', { timeout: 5000 })
+  await page.goto("/login");
+  await page.locator("#email").fill("dev@ship.local");
+  await page.locator("#password").fill("admin123");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).not.toHaveURL("/login", { timeout: 5000 });
 }
 
 // Helper to create a new document and get to the editor
 async function createNewDocument(page: Page) {
-  await page.goto('/docs')
-  await page.getByRole('button', { name: 'New Document', exact: true }).click()
-  await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+/, { timeout: 10000 })
-  await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 5000 })
+  await page.goto("/docs");
+  await page.getByRole("button", { name: "New Document", exact: true }).click();
+  await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+/, { timeout: 10000 });
+  return waitForDocumentEditor(page);
 }
 
-test.describe('Emoji Picker', () => {
+function emojiPicker(page: Page) {
+  return page.getByRole("listbox", { name: /Emoji picker/i });
+}
+
+const emojiPattern =
+  /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+
+async function waitForPickerVisible(page: Page) {
+  const picker = emojiPicker(page);
+  await expect(picker).toBeVisible({ timeout: 5000 });
+  return picker;
+}
+
+test.describe("Emoji Picker", () => {
   test.beforeEach(async ({ page }) => {
-    await login(page)
-  })
+    await login(page);
+  });
 
-  test('typing : shows emoji picker', async ({ page }) => {
-    await createNewDocument(page)
+  test("typing : shows emoji picker", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await editor.click();
 
-    // Type : to trigger emoji picker
-    await page.keyboard.type(':')
-    await page.waitForTimeout(500)
+    await page.keyboard.type(":");
 
-    // Emoji picker should appear (look for common selectors)
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
-  })
+    await waitForPickerVisible(page);
+  });
 
-  test('typing filters emoji list', async ({ page }) => {
-    await createNewDocument(page)
+  test("typing filters emoji list", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await editor.click();
 
-    // Type :smile to filter
-    await page.keyboard.type(':smile')
-    await page.waitForTimeout(500)
+    await page.keyboard.type(":smile");
 
-    // Picker should be visible
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
+    const picker = await waitForPickerVisible(page);
 
-    // Should show filtered results (look for emoji options)
-    const options = page.locator('[role="option"], .emoji-option, [data-emoji-option]')
-    const count = await options.count()
-    expect(count).toBeGreaterThan(0)
+    const options = picker.getByRole("option");
+    const count = await options.count();
+    expect(count).toBeGreaterThan(0);
+    const pickerText = await picker.textContent();
+    expect(pickerText?.toLowerCase()).toContain("smile");
+  });
 
-    // Results should be related to "smile"
-    const pickerText = await picker.textContent()
-    expect(pickerText?.toLowerCase()).toContain('smile')
-  })
+  test("can select emoji with Enter key", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-  test('can select emoji with Enter key', async ({ page }) => {
-    await createNewDocument(page)
+    await editor.click();
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await page.keyboard.type(":smile");
 
-    // Type to trigger picker and filter
-    await page.keyboard.type(':smile')
-    await page.waitForTimeout(500)
+    const picker = await waitForPickerVisible(page);
+    await expect(picker.getByRole("option").first()).toBeVisible({
+      timeout: 5000,
+    });
 
-    // Wait for picker to be visible
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
+    await page.keyboard.press("Enter");
 
-    // Press Enter to select first option
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(300)
+    await expect(picker).toBeHidden({ timeout: 5000 });
+    const editorContent = await editor.textContent();
+    expect(editorContent).toMatch(emojiPattern);
+  });
 
-    // Emoji should be inserted in editor
-    const editorContent = await editor.textContent()
-    // Should contain some emoji character (unicode emoji)
-    expect(editorContent).toMatch(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u)
-  })
+  test("can select emoji with click", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-  test('can select emoji with click', async ({ page }) => {
-    await createNewDocument(page)
+    await editor.click();
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await page.keyboard.type(":heart");
 
-    // Type to trigger picker
-    await page.keyboard.type(':heart')
-    await page.waitForTimeout(500)
+    const picker = await waitForPickerVisible(page);
 
-    // Wait for picker
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
+    const firstOption = picker.getByRole("option").first();
+    await expect(firstOption).toBeVisible({ timeout: 5000 });
+    await firstOption.click();
+    await expect(picker).toBeHidden({ timeout: 5000 });
 
-    // Click first emoji option
-    const firstOption = page.locator('[role="option"], .emoji-option, [data-emoji-option]').first()
-    if (await firstOption.isVisible()) {
-      await firstOption.click()
-      await page.waitForTimeout(300)
+    const editorContent = await editor.textContent();
+    expect(editorContent).toMatch(emojiPattern);
+  });
 
-      // Emoji should be inserted
-      const editorContent = await editor.textContent()
-      expect(editorContent).toMatch(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u)
-    } else {
-      expect(true).toBe(false) // Element not found, test cannot continue
-    }
-  })
+  test("emoji renders correctly in document", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-  test('emoji renders correctly in document', async ({ page }) => {
-    await createNewDocument(page)
+    await editor.click();
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await page.keyboard.type(":thumbs");
 
-    // Type and insert emoji
-    await page.keyboard.type(':thumbs')
-    await page.waitForTimeout(500)
+    const picker = await waitForPickerVisible(page);
+    await page.keyboard.press("Enter");
+    await expect(picker).toBeHidden({ timeout: 5000 });
 
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    if (await picker.isVisible({ timeout: 3000 })) {
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(500)
+    const editorContent = await editor.textContent();
+    expect(editorContent?.length).toBeGreaterThan(0);
 
-      // Emoji should be visible and rendered
-      const editorContent = await editor.textContent()
-      expect(editorContent?.length).toBeGreaterThan(0)
+    const hasEmoji = await editor.evaluate((el) => {
+      const text = el.textContent || "";
+      return /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(
+        text,
+      );
+    });
+    expect(hasEmoji).toBeTruthy();
+  });
 
-      // Check that emoji is visible (not just text)
-      const hasEmoji = await editor.evaluate(el => {
-        const text = el.textContent || ''
-        // Unicode emoji range check
-        return /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(text)
-      })
-      expect(hasEmoji).toBeTruthy()
-    } else {
-      expect(true).toBe(false) // Element not found, test cannot continue
-    }
-  })
+  test("emoji persists after save and reload", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-  test('emoji persists after save and reload', async ({ page }) => {
-    await createNewDocument(page)
+    await editor.click();
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await page.keyboard.type(":fire");
 
-    // Insert emoji
-    await page.keyboard.type(':fire')
-    await page.waitForTimeout(500)
+    const picker = await waitForPickerVisible(page);
+    const documentId = new URL(page.url()).pathname
+      .split("/documents/")[1]
+      ?.split("/")[0];
+    const saveResponse = page.waitForResponse((response) => {
+      return Boolean(
+        documentId &&
+        response.request().method() === "PATCH" &&
+        response.url().includes(`/api/documents/${documentId}`),
+      );
+    });
+    await page.keyboard.press("Enter");
+    await expect(picker).toBeHidden({ timeout: 5000 });
 
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    if (await picker.isVisible({ timeout: 3000 })) {
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(500)
+    await expect(editor).toContainText(emojiPattern);
+    await saveResponse;
 
-      // Get emoji content
-      const originalContent = await editor.textContent()
-      const hasEmoji = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(originalContent || '')
+    const docUrl = page.url();
 
-      if (hasEmoji) {
-        // Get current URL
-        const docUrl = page.url()
+    await page.goto("/docs");
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible({
+      timeout: 5000,
+    });
 
-        // Wait for auto-save
-        await page.waitForTimeout(2000)
+    await page.goto(docUrl);
+    const restoredEditor = await waitForDocumentEditor(page);
+    await expect(restoredEditor).toContainText(emojiPattern);
+  });
 
-        // Navigate away and back
-        await page.goto('/docs')
-        await expect(page.getByRole('heading', { name: 'Documents' })).toBeVisible({ timeout: 5000 })
+  test("can navigate emoji picker with arrow keys", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-        // Navigate back to document
-        await page.goto(docUrl)
-        await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 5000 })
-        await page.waitForTimeout(1000)
+    await editor.click();
 
-        // Verify emoji persisted
-        const restoredContent = await editor.textContent()
-        const stillHasEmoji = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(restoredContent || '')
-        expect(stillHasEmoji).toBeTruthy()
-      } else {
-        expect(true).toBe(false) // Element not found, test cannot continue
-      }
-    } else {
-      expect(true).toBe(false) // Element not found, test cannot continue
-    }
-  })
+    await page.keyboard.type(":smile");
 
-  test('can navigate emoji picker with arrow keys', async ({ page }) => {
-    await createNewDocument(page)
+    const picker = await waitForPickerVisible(page);
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await page.keyboard.press("ArrowDown");
 
-    // Type to trigger picker
-    await page.keyboard.type(':smile')
-    await page.waitForTimeout(500)
+    const selectedOption = picker.getByRole("option", { selected: true });
+    const hasSelection = await selectedOption.count();
+    expect(hasSelection).toBeGreaterThanOrEqual(0);
 
-    // Wait for picker
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
+    await page.keyboard.press("ArrowUp");
 
-    // Press ArrowDown to navigate
-    await page.keyboard.press('ArrowDown')
-    await page.waitForTimeout(200)
+    await page.keyboard.press("Escape");
 
-    // Check if there's a selected option (aria-selected="true")
-    const selectedOption = page.locator('[role="option"][aria-selected="true"], .emoji-option.selected, [data-emoji-option].selected')
-    const hasSelection = await selectedOption.count()
+    await expect(picker).toBeHidden({ timeout: 2000 });
+  });
 
-    // Navigation should work (either selection exists or we can verify keyboard works)
-    expect(hasSelection).toBeGreaterThanOrEqual(0)
+  test("pressing Escape closes emoji picker", async ({ page }) => {
+    const editor = await createNewDocument(page);
 
-    // Try pressing ArrowUp
-    await page.keyboard.press('ArrowUp')
-    await page.waitForTimeout(200)
+    await editor.click();
 
-    // Pressing Escape should close picker
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(300)
+    await page.keyboard.type(":joy");
 
-    // Picker should be hidden
-    await expect(picker).toBeHidden({ timeout: 2000 })
-  })
+    const picker = await waitForPickerVisible(page);
 
-  test('pressing Escape closes emoji picker', async ({ page }) => {
-    await createNewDocument(page)
+    await page.keyboard.press("Escape");
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    await expect(picker).toBeHidden({ timeout: 2000 });
+  });
 
-    // Type to trigger picker
-    await page.keyboard.type(':joy')
-    await page.waitForTimeout(500)
+  test("typing non-matching text shows no results", async ({ page }) => {
+    await createNewDocument(page);
 
-    // Wait for picker
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
-    await expect(picker).toBeVisible({ timeout: 3000 })
-
-    // Press Escape
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(300)
-
-    // Picker should be hidden
-    await expect(picker).toBeHidden({ timeout: 2000 })
-  })
-
-  test('typing non-matching text shows no results', async ({ page }) => {
-    await createNewDocument(page)
-
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
 
     // Type something that won't match any emoji
-    await page.keyboard.type(':zzzznonexistent12345')
-    await page.waitForTimeout(500)
+    await page.keyboard.type(":zzzznonexistent12345");
+    await page.waitForTimeout(500);
 
     // Picker might show "No results" or be hidden
-    const picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
+    const picker = page
+      .locator('[role="listbox"], .emoji-picker, [data-emoji-picker]')
+      .first();
 
     if (await picker.isVisible({ timeout: 1000 })) {
       // Check for "No results" message
-      const pickerText = await picker.textContent()
-      const hasNoResults = pickerText?.toLowerCase().includes('no') ||
-                          pickerText?.toLowerCase().includes('not found') ||
-                          pickerText?.toLowerCase().includes('empty')
+      const pickerText = await picker.textContent();
+      const hasNoResults =
+        pickerText?.toLowerCase().includes("no") ||
+        pickerText?.toLowerCase().includes("not found") ||
+        pickerText?.toLowerCase().includes("empty");
 
       // Or check that options count is 0
-      const options = page.locator('[role="option"], .emoji-option, [data-emoji-option]')
-      const count = await options.count()
+      const options = page.locator(
+        '[role="option"], .emoji-option, [data-emoji-option]',
+      );
+      const count = await options.count();
 
-      expect(hasNoResults || count === 0).toBeTruthy()
+      expect(hasNoResults || count === 0).toBeTruthy();
     } else {
       // Picker not visible is also acceptable (auto-closed on no results)
-      expect(true).toBeTruthy()
+      expect(true).toBeTruthy();
     }
-  })
+  });
 
-  test('can insert multiple emojis in same document', async ({ page }) => {
-    await createNewDocument(page)
+  test("can insert multiple emojis in same document", async ({ page }) => {
+    await createNewDocument(page);
 
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
 
     // Insert first emoji
-    await page.keyboard.type(':smile')
-    await page.waitForTimeout(500)
+    await page.keyboard.type(":smile");
+    await page.waitForTimeout(500);
 
-    let picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
+    let picker = page
+      .locator('[role="listbox"], .emoji-picker, [data-emoji-picker]')
+      .first();
     if (await picker.isVisible({ timeout: 3000 })) {
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(300)
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(300);
 
       // Type some text
-      await page.keyboard.type(' hello ')
-      await page.waitForTimeout(200)
+      await page.keyboard.type(" hello ");
+      await page.waitForTimeout(200);
 
       // Insert second emoji
-      await page.keyboard.type(':heart')
-      await page.waitForTimeout(500)
+      await page.keyboard.type(":heart");
+      await page.waitForTimeout(500);
 
-      picker = page.locator('[role="listbox"], .emoji-picker, [data-emoji-picker]').first()
+      picker = page
+        .locator('[role="listbox"], .emoji-picker, [data-emoji-picker]')
+        .first();
       if (await picker.isVisible({ timeout: 3000 })) {
-        await page.keyboard.press('Enter')
-        await page.waitForTimeout(500)
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(500);
 
         // Verify content has both emojis and text
-        const content = await editor.textContent()
-        expect(content).toContain('hello')
+        const content = await editor.textContent();
+        expect(content).toContain("hello");
 
         // Count emoji characters
-        const emojiMatches = content?.match(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu)
-        expect(emojiMatches?.length).toBeGreaterThanOrEqual(1)
+        const emojiMatches = content?.match(
+          /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu,
+        );
+        expect(emojiMatches?.length).toBeGreaterThanOrEqual(1);
       }
     } else {
-      expect(true).toBe(false) // Element not found, test cannot continue
+      expect(true).toBe(false); // Element not found, test cannot continue
     }
-  })
-})
+  });
+});

@@ -1,3 +1,5 @@
+import { isTipTapDoc, type TipTapDoc, type TipTapNode } from '@ship/shared';
+
 /**
  * Extract hypothesis content from TipTap JSON document structure.
  *
@@ -6,18 +8,6 @@
  *
  * Returns the extracted text as a plain string, or null if no hypothesis found.
  */
-
-interface TipTapNode {
-  type: string;
-  content?: TipTapNode[];
-  text?: string;
-  attrs?: Record<string, unknown>;
-}
-
-interface TipTapDoc {
-  type: 'doc';
-  content?: TipTapNode[];
-}
 
 /**
  * Extract plain text from a TipTap node tree
@@ -67,10 +57,9 @@ function isH2Heading(node: TipTapNode): boolean {
  * @returns Extracted hypothesis text, or null if no hypothesis section found
  */
 export function extractHypothesisFromContent(content: unknown): string | null {
-  if (!content || typeof content !== 'object') return null;
+  if (!isTipTapDoc(content)) return null;
 
-  const doc = content as TipTapDoc;
-  if (doc.type !== 'doc' || !Array.isArray(doc.content)) return null;
+  const doc: TipTapDoc = content;
 
   const nodes = doc.content;
 
@@ -122,10 +111,9 @@ export function extractHypothesisFromContent(content: unknown): string | null {
  * @returns Extracted success criteria text, or null if no section found
  */
 export function extractSuccessCriteriaFromContent(content: unknown): string | null {
-  if (!content || typeof content !== 'object') return null;
+  if (!isTipTapDoc(content)) return null;
 
-  const doc = content as TipTapDoc;
-  if (doc.type !== 'doc' || !Array.isArray(doc.content)) return null;
+  const doc: TipTapDoc = content;
 
   const nodes = doc.content;
   let startIndex = -1;
@@ -172,10 +160,9 @@ export function extractSuccessCriteriaFromContent(content: unknown): string | nu
  * @returns Extracted vision text, or null if no section found
  */
 export function extractVisionFromContent(content: unknown): string | null {
-  if (!content || typeof content !== 'object') return null;
+  if (!isTipTapDoc(content)) return null;
 
-  const doc = content as TipTapDoc;
-  if (doc.type !== 'doc' || !Array.isArray(doc.content)) return null;
+  const doc: TipTapDoc = content;
 
   const nodes = doc.content;
   let startIndex = -1;
@@ -222,10 +209,9 @@ export function extractVisionFromContent(content: unknown): string | null {
  * @returns Extracted goals text, or null if no section found
  */
 export function extractGoalsFromContent(content: unknown): string | null {
-  if (!content || typeof content !== 'object') return null;
+  if (!isTipTapDoc(content)) return null;
 
-  const doc = content as TipTapDoc;
-  if (doc.type !== 'doc' || !Array.isArray(doc.content)) return null;
+  const doc: TipTapDoc = content;
 
   const nodes = doc.content;
   let startIndex = -1;

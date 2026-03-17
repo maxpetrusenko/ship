@@ -1,14 +1,13 @@
 import { createServer } from 'http';
-import { config } from 'dotenv';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { loadEnvFiles } from './config/env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables (.env.local takes precedence)
-config({ path: join(__dirname, '../.env.local') });
-config({ path: join(__dirname, '../.env') });
+// Load environment variables (.env.local takes precedence, then .env.hostinger, then .env)
+loadEnvFiles(join(__dirname, '..'));
 
 async function main() {
   // Load secrets from SSM in production (before importing app)
@@ -19,7 +18,7 @@ async function main() {
 
   // Now import app after secrets are loaded
   const { createApp } = await import('./app.js');
-  const { setupCollaboration } = await import('./collaboration/index.js');
+  const { setupCollaboration, broadcastToUser } = await import('./collaboration/index.js');
 
   const PORT = process.env.PORT || 3000;
   const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
@@ -40,6 +39,16 @@ async function main() {
     console.log(`API server running on http://localhost:${PORT}`);
     console.log(`CORS origin: ${CORS_ORIGIN}`);
   });
+
+  // --- FleetGraph startup (non-critical) ---
+  try {
+    const { bootstrapFleetGraph } = await import('./fleetgraph/bootstrap.js');
+    const { pool } = await import('./db/client.js');
+    await bootstrapFleetGraph(pool, broadcastToUser);
+  } catch (err) {
+    console.warn('[FleetGraph] Disabled; server continues without it');
+    console.error('[FleetGraph] Startup error:', err);
+  }
 }
 
 main().catch((err) => {

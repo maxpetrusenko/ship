@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { getCurrentWeekLabelClass } from '@/lib/weekHeaderStyles';
 import { apiPost, apiGet, apiDelete } from '@/lib/api';
 import { formatDateRange } from '@/lib/date-utils';
+import { buildProgramGroups } from './teamModeGroups';
 
 interface User {
   personId: string; // Document ID - used for allocations (works for both pending and active)
@@ -44,15 +45,6 @@ interface TeamGridData {
 
 const SPRINTS_PER_LOAD = 5;
 const SCROLL_THRESHOLD = 200;
-
-// Program group info for grouping users
-interface ProgramGroup {
-  programId: string | null;
-  programName: string;
-  emoji: string | null;
-  color: string | null;
-  users: User[];
-}
 
 export function TeamModePage() {
   const navigate = useNavigate();
@@ -134,45 +126,14 @@ export function TeamModePage() {
   // Group users by their assignment's program for the viewed sprint
   const groupingSprintNumber = viewAsSprintNumber ?? currentSprintNumber;
 
-  const programGroups = useMemo((): ProgramGroup[] => {
+  const programGroups = useMemo(() => {
     if (!data) return [];
 
-    const groups: Map<string, ProgramGroup> = new Map();
-    const UNASSIGNED_KEY = '__unassigned__';
-
-    for (const user of filteredUsers) {
-      const currentAssignment = groupingSprintNumber
-        ? assignments[user.personId]?.[groupingSprintNumber]
-        : null;
-
-      const groupKey = currentAssignment?.programId || UNASSIGNED_KEY;
-
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, {
-          programId: currentAssignment?.programId || null,
-          programName: currentAssignment?.programName || 'Unassigned',
-          emoji: currentAssignment?.emoji || null,
-          color: currentAssignment?.color || null,
-          users: [],
-        });
-      }
-
-      groups.get(groupKey)!.users.push(user);
-    }
-
-    // Sort groups: alphabetically by name, with Unassigned last
-    const sortedGroups = Array.from(groups.values()).sort((a, b) => {
-      if (a.programId === null) return 1;
-      if (b.programId === null) return -1;
-      return a.programName.localeCompare(b.programName);
+    return buildProgramGroups({
+      users: filteredUsers,
+      assignments,
+      groupingSprintNumber,
     });
-
-    // Sort users within each group alphabetically
-    for (const group of sortedGroups) {
-      group.users.sort((a, b) => a.name.localeCompare(b.name));
-    }
-
-    return sortedGroups;
   }, [data, filteredUsers, assignments, groupingSprintNumber]);
 
   // Toggle program group collapse

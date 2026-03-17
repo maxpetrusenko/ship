@@ -192,6 +192,7 @@ export function ProjectSidebar({
           value={project.owner?.id || null}
           onChange={(ownerId) => onUpdate({ owner_id: ownerId } as Partial<Project>)}
           placeholder="Select owner..."
+          ariaLabel="Owner"
         />
       </PropertyRow>
 
@@ -202,6 +203,7 @@ export function ProjectSidebar({
           value={project.accountable_id || null}
           onChange={(accountableId) => onUpdate({ accountable_id: accountableId } as Partial<Project>)}
           placeholder="Select approver..."
+          ariaLabel="Accountable"
         />
       </PropertyRow>
 
@@ -332,6 +334,7 @@ export function ProjectSidebar({
           value={project.program_id}
           onChange={(programId) => onUpdate({ program_id: programId })}
           placeholder="No program"
+          ariaLabel="Program"
         />
       </PropertyRow>
 

@@ -1,3 +1,4 @@
+import { useId, Children, isValidElement, cloneElement } from 'react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface PropertyRowProps {
@@ -11,12 +12,33 @@ interface PropertyRowProps {
  * PropertyRow - Standard property field layout for document sidebars
  *
  * Supports optional tooltip and field highlighting (e.g., for missing required fields).
+ * Generates a stable label id via useId() and injects aria-labelledby on direct child
+ * elements for accessible label association (WCAG).
  */
 export function PropertyRow({ label, tooltip, highlighted, children }: PropertyRowProps) {
+  const labelId = useId();
+
+  const labelledChildren = Children.map(children, (child) => {
+    if (isValidElement(child)) {
+      const existing = (child.props as Record<string, unknown>);
+      // Skip if child already has an accessible label
+      if (existing['aria-label'] || existing['aria-labelledby'] || existing['id']) {
+        return child;
+      }
+      return cloneElement(child as React.ReactElement<Record<string, unknown>>, {
+        'aria-labelledby': labelId,
+      });
+    }
+    return child;
+  });
+
   return (
     <div>
       <div className="mb-1 flex items-center gap-1">
-        <label className={`text-xs font-medium ${highlighted ? 'text-amber-500' : 'text-muted'}`}>
+        <label
+          id={labelId}
+          className={`text-xs font-medium ${highlighted ? 'text-amber-500' : 'text-muted'}`}
+        >
           {label}
           {highlighted && <span className="ml-1 text-amber-500">*</span>}
         </label>
@@ -34,7 +56,7 @@ export function PropertyRow({ label, tooltip, highlighted, children }: PropertyR
           </Tooltip>
         )}
       </div>
-      {children}
+      {labelledChildren}
     </div>
   );
 }

@@ -433,17 +433,20 @@ test.describe('Security - CSRF Protection', () => {
 
 test.describe('Security - Authentication and Authorization', () => {
   test('authenticated routes require auth', async ({ browser, baseURL }) => {
-    // Test each protected route with a fresh browser context to avoid state accumulation
-    // Note: Use actual route names from main.tsx (programs not projects, team/allocation not team)
+    // Test each protected route with a truly fresh browser context to avoid storage leakage.
     const protectedRoutes = ['/docs', '/issues', '/programs', '/team/allocation']
 
     for (const route of protectedRoutes) {
-      // Create fresh context for each route to avoid IndexedDB/localStorage caching
-      const context = await browser.newContext()
+      const context = await browser.newContext({
+        storageState: { cookies: [], origins: [] },
+      })
+      await context.addInitScript(() => {
+        window.localStorage.clear()
+        window.sessionStorage.clear()
+      })
       const page = await context.newPage()
 
       await page.goto(`${baseURL}${route}`)
-      // Should redirect to login - give React time to initialize, check auth, and redirect
       await expect(page).toHaveURL(/\/login/, { timeout: 10000 })
 
       await context.close()

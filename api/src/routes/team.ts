@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { authMiddleware } from '../middleware/auth.js';
+import type { TeamGridIssueRow } from '@ship/shared';
 import { TEMPLATE_HEADINGS, extractText, hasContent } from '../utils/document-content.js';
+import { normalizeDateOnlyValue, startOfUtcDay } from '../utils/dateOnly.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -44,7 +46,7 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
     );
 
     // Get workspace sprint start date
-    const workspaceResult = await pool.query(
+    const workspaceResult = await pool.query<{ sprint_start_date: Date | string }>(
       `SELECT sprint_start_date FROM workspaces WHERE id = $1`,
       [workspaceId]
     );
@@ -52,21 +54,11 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
     const rawSprintStartDate = workspaceResult.rows[0]?.sprint_start_date;
     const sprintDurationDays = 7; // 1-week sprints
 
-    const today = new Date();
+    const today = startOfUtcDay(new Date());
 
     // Normalize sprint start date to midnight UTC to avoid timezone issues
     // pg driver may return DATE as a Date object with local timezone offset
-    let startDate: Date;
-    if (rawSprintStartDate instanceof Date) {
-      // Extract just the date parts and create a UTC midnight date
-      startDate = new Date(Date.UTC(rawSprintStartDate.getFullYear(), rawSprintStartDate.getMonth(), rawSprintStartDate.getDate()));
-    } else if (typeof rawSprintStartDate === 'string') {
-      // Parse string as UTC midnight
-      startDate = new Date(rawSprintStartDate + 'T00:00:00Z');
-    } else {
-      // Fallback to today
-      startDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-    }
+    const startDate = normalizeDateOnlyValue(rawSprintStartDate, today);
 
     // Calculate which sprint number we're in
     const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -100,25 +92,9 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
       });
     }
 
-    // Get all sprints from database that fall within our date range
-    const minDate = sprints[0]?.startDate || today.toISOString().split('T')[0];
-    const maxDate = sprints[sprints.length - 1]?.endDate || today.toISOString().split('T')[0];
-
-    const dbSprintsResult = await pool.query(`SELECT d.id, d.title AS name, d.properties->>'start_date' AS start_date, d.properties->>'end_date' AS end_date,
-              prog_da.related_id AS program_id,
-              p.title AS program_name, p.properties->>'emoji' AS program_emoji, p.properties->>'color' AS program_color
-       FROM documents d
-       LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
-       LEFT JOIN documents p ON prog_da.related_id = p.id AND p.document_type = 'program'
-       WHERE d.workspace_id = $1 AND d.document_type = 'sprint'
-         AND (d.properties->>'start_date')::date >= $2 AND (d.properties->>'end_date')::date <= $3
-         AND ${VISIBILITY_FILTER_SQL('d', '$4', '$5')}`,
-      [workspaceId, minDate, maxDate, userId, isAdmin]
-    );
-
-    // Get issues with sprint and assignee info (only visible issues)
-    const issuesResult = await pool.query(`SELECT i.id, i.title, da_sprint.related_id AS sprint_id, i.properties->>'assignee_id' AS assignee_id, i.properties->>'state' AS state, i.ticket_number,
-              s.properties->>'start_date' AS sprint_start, s.properties->>'end_date' AS sprint_end,
+    // Get issues with sprint and assignee info (only visible issues within the requested sprint window)
+    const issuesResult = await pool.query<TeamGridIssueRow>(`SELECT i.id, i.title, i.properties->>'assignee_id' AS assignee_id, i.properties->>'state' AS state, i.ticket_number,
+              (s.properties->>'sprint_number')::int AS sprint_number,
               prog_da.related_id AS program_id, p.title AS program_name, p.properties->>'emoji' AS program_emoji, p.properties->>'color' AS program_color
        FROM documents i
        JOIN document_associations da_sprint ON da_sprint.document_id = i.id AND da_sprint.relationship_type = 'sprint'
@@ -126,27 +102,23 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
        LEFT JOIN document_associations prog_da ON i.id = prog_da.document_id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id AND p.document_type = 'program'
        WHERE i.workspace_id = $1 AND i.document_type = 'issue' AND i.properties->>'assignee_id' IS NOT NULL
+         AND (s.properties->>'sprint_number')::int BETWEEN $4 AND $5
          AND ${VISIBILITY_FILTER_SQL('i', '$2', '$3')}`,
-      [workspaceId, userId, isAdmin]
+      [workspaceId, userId, isAdmin, fromSprint, toSprint]
     );
 
     // Build associations: user_id -> sprint_number -> { programs: [...], issues: [...] }
     const associations: Record<string, Record<number, {
-      programs: Array<{ id: string; name: string; emoji?: string | null; color: string; issueCount: number }>;
+      programs: Array<{ id: string | null; name: string | null; emoji?: string | null; color: string | null; issueCount: number }>;
       issues: Array<{ id: string; title: string; displayId: string; state: string }>;
     }>> = {};
 
     for (const issue of issuesResult.rows) {
       const userId = issue.assignee_id;
-      // Parse issue's sprint start date as UTC midnight to match startDate
-      const sprintStart = new Date(issue.sprint_start + 'T00:00:00Z');
-
-      // Calculate which sprint number this issue belongs to
-      const daysSinceStart = Math.floor((sprintStart.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      const sprintNumber = Math.max(1, Math.floor(daysSinceStart / sprintDurationDays) + 1);
+      const sprintNumber = issue.sprint_number;
 
       // Skip if outside our range
-      if (!sprints.find(s => s.number === sprintNumber)) continue;
+      if (!userId || !sprintNumber || !sprints.find((s) => s.number === sprintNumber)) continue;
 
       if (!associations[userId]) {
         associations[userId] = {};
@@ -161,8 +133,8 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
       cell.issues.push({
         id: issue.id,
         title: issue.title,
-        displayId: `#${issue.ticket_number}`,
-        state: issue.state,
+        displayId: issue.ticket_number ? `#${issue.ticket_number}` : '#?',
+        state: issue.state || 'backlog',
       });
 
       // Add program if not already there
@@ -174,7 +146,7 @@ router.get('/grid', authMiddleware, async (req: Request, res: Response) => {
           id: issue.program_id,
           name: issue.program_name,
           emoji: issue.program_emoji,
-          color: issue.program_color,
+          color: issue.program_color ?? null,
           issueCount: 1,
         });
       }
@@ -328,16 +300,8 @@ router.get('/assignments', authMiddleware, async (req: Request, res: Response) =
 
     const rawSprintStartDate = workspaceResult.rows[0]?.sprint_start_date;
     const sprintDurationDays = 7;
-    const today = new Date();
-
-    let startDate: Date;
-    if (rawSprintStartDate instanceof Date) {
-      startDate = new Date(Date.UTC(rawSprintStartDate.getFullYear(), rawSprintStartDate.getMonth(), rawSprintStartDate.getDate()));
-    } else if (typeof rawSprintStartDate === 'string') {
-      startDate = new Date(rawSprintStartDate + 'T00:00:00Z');
-    } else {
-      startDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-    }
+    const today = startOfUtcDay(new Date());
+    const startDate = normalizeDateOnlyValue(rawSprintStartDate, today);
 
     // Get all issues with assignees, projects, and sprint info for inferred assignments
     const issuesResult = await pool.query(`SELECT

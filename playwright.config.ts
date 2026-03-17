@@ -17,8 +17,8 @@
  * (lightweight static server) instead of vite dev (heavy HMR server).
  */
 
-import { defineConfig, devices } from '@playwright/test';
-import os from 'os';
+import { defineConfig, devices } from "@playwright/test";
+import os from "os";
 
 // Calculate safe worker count based on available memory
 function getWorkerCount(): number {
@@ -40,12 +40,16 @@ function getWorkerCount(): number {
 
   // Calculate memory-based limit
   const memoryBasedLimit = Math.floor((freeMemGB - reserveGB) / memPerWorker);
+  const localWorkerCap = 4;
 
   // Also consider CPU cores - no point having more workers than cores
   const cpuCores = os.cpus().length;
 
-  // Use the smaller of memory limit or CPU cores (no arbitrary cap - CPU cores is the natural limit)
-  const finalCount = Math.max(1, Math.min(memoryBasedLimit, cpuCores));
+  // Use the smallest of memory limit, CPU cores, and local cap
+  const finalCount = Math.max(
+    1,
+    Math.min(memoryBasedLimit, cpuCores, localWorkerCap),
+  );
 
   return finalCount;
 }
@@ -54,31 +58,31 @@ function getWorkerCount(): number {
 const calculatedWorkers = getWorkerCount();
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 1,  // 1 retry locally for flaky WebSocket/timing tests
+  retries: process.env.CI ? 2 : 1, // 1 retry locally for flaky WebSocket/timing tests
   workers: calculatedWorkers,
   // Reporters:
   // - 'line' shows real-time progress: [1/641] ✓ auth.spec.ts:15 (2.3s)
   // - 'html' generates detailed report at end
   // - './e2e/progress-reporter.ts' writes JSONL for live monitoring
   reporter: process.env.CI
-    ? [['github'], ['html', { open: 'never' }], ['./e2e/progress-reporter.ts']]
-    : [['line'], ['html', { open: 'never' }], ['./e2e/progress-reporter.ts']],
+    ? [["github"], ["html", { open: "never" }], ["./e2e/progress-reporter.ts"]]
+    : [["line"], ["html", { open: "never" }], ["./e2e/progress-reporter.ts"]],
   use: {
     // baseURL is provided by the isolated-env fixture
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
   },
-  // Longer timeout for container startup
-  timeout: 60000,
+  // Longer timeout for container startup and worker-scoped isolated fixtures
+  timeout: 120000,
   // Global setup builds API and Web once before all workers
-  globalSetup: './e2e/global-setup.ts',
+  globalSetup: "./e2e/global-setup.ts",
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
   // NO webServer - the fixture handles server startup per worker

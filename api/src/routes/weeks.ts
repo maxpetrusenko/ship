@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { z } from 'zod';
+import type { StandupRow } from '@ship/shared';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
@@ -1811,7 +1812,7 @@ const createStandupSchema = z.object({
 });
 
 // Helper to format standup response
-function formatStandupResponse(row: any) {
+function formatStandupResponse(row: StandupRow) {
   return {
     id: row.id,
     sprint_id: row.parent_id,
@@ -1893,8 +1894,10 @@ router.get('/:id/standups', authMiddleware, async (req: Request, res: Response) 
     const standups = await Promise.all(
       result.rows.map(async (row) => {
         const formatted = formatStandupResponse(row);
-        formatted.content = await transformIssueLinks(formatted.content, workspaceId, issueMap);
-        return formatted;
+        return {
+          ...formatted,
+          content: await transformIssueLinks(formatted.content, workspaceId, issueMap),
+        };
       })
     );
 

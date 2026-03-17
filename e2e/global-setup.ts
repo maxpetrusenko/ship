@@ -17,6 +17,12 @@ import os from 'os';
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 export default async function globalSetup() {
+  console.log('\nRunning Playwright preflight...');
+  execSync('node scripts/playwright-preflight.mjs', {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
+
   // Memory check at startup
   const totalMemGB = os.totalmem() / (1024 * 1024 * 1024);
   const freeMemGB = os.freemem() / (1024 * 1024 * 1024);

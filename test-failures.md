@@ -1,51 +1,36 @@
-# Failing E2E Tests Analysis
+# E2E Failure Inventory
 
-Generated: $(date)
+Last reviewed: 2026-03-17
 
-**Summary: 15 failing tests across 6 categories**
+This file previously listed `15` failing E2E tests. That inventory had drifted from the checked-in repo:
 
-## Categories
+- several named specs no longer exist
+- several test names no longer exist
+- multiple failures were selector drift against old UI contracts rather than current product behavior
 
-### 1. Program Tabs - Feedback Tab Not Found (4 tests)
-Tests expect a "Feedback" tab in program editor that may have been renamed/removed:
-- programs.spec__program_editor_has_tabbed_navigation__Overview__Is
-- programs.spec__can_switch_between_program_tabs
-- programs.spec__can_give_feedback_from_program_Feedback_tab
-- programs.spec__Feedback_tab_shows_filter_options
+Current status of that historical inventory:
 
-**Fix**: Check if Feedback tab exists or update tests to match current UI
+1. Program tabs
+   Current repo already reflects the removed Feedback tab contract in [feedback-consolidation.spec.ts](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/e2e/feedback-consolidation.spec.ts).
 
-### 2. Context Menu Tests (3 tests)
-Right-click context menu not appearing:
-- issues-bulk-operations.spec__can_right_click_to_open_context_menu
-- issues-bulk-operations.spec__can_archive_an_issue_via_context_menu  
-- issues-bulk-operations.spec__context_menu_shows_change_status_option
+2. Context menus
+   Specs were updated to current selectors and current surfaces in [context-menus.spec.ts](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/e2e/context-menus.spec.ts).
 
-**Fix**: Verify context menu implementation and aria-label
+3. Bulk-selection checkbox visibility
+   Selector updated to the current row-scoped checkbox contract in [program-mode-week-ux.spec.ts](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/e2e/program-mode-week-ux.spec.ts).
 
-### 3. Offline Tests (3 tests)
-Offline functionality issues:
-- offline-07-session-handling.spec__app_remains_usable_offline_even_with_expired_sessi
-- offline-07-session-handling.spec__session_expiry_during_offline_does_not_lose_local_
-- offline-08-websocket.spec__WebSocket_reconnects_automatically_when_online
-- offline-11-multi-tab.spec__changes_in_one_offline_tab_appear_in_another_offli
+4. Right-click selection state
+   Root-cause bug fixed in [SelectableList.tsx](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/components/SelectableList.tsx) with regression coverage in [SelectableList.test.tsx](/Users/maxpetrusenko/Desktop/Gauntlet/ShipShapeProject/ShipShape/web/src/components/SelectableList.test.tsx).
 
-**Fix**: Review offline implementation and sync status text ("SavedSaved" duplicate)
+Open work:
 
-### 4. Security Test (1 test)
-- security.spec__authenticated_routes_require_auth
-Expected redirect to /login but got /projects - possible test isolation issue
-
-**Fix**: Check test setup/teardown for session leakage
-
-### 5. Race Conditions (1 test)
-- race-conditions.spec__concurrent_edits_in_same_location_converge
-Editor content empty when expected "Initial text" - timing issue
-
-**Fix**: Add wait for content or increase timeout
-
-### 6. UI Element Tests (2 tests)
-- accessibility-remediation.spec__draggable_issues_can_be_moved_with_keyboard
-- program-mode-sprint-ux.spec__issues_table_has_checkbox_column_for_bulk_selectio
-
-**Fix**: Verify UI elements exist and have correct selectors
+- full E2E re-run required for authoritative counts
+- offline/session/race-condition cases require fresh runtime evidence rather than historical doc inference
+- code-side mitigations for the documented `9` flaky tests landed on 2026-03-17:
+  - infra/memory: `120000` timeout for isolated worker setup, serial mode for heavy suites
+  - timing: explicit table/editor readiness helpers in place of blind waits
+  - timing/cache: `/my-week` now refetches on mount and clears cached query state on unmount
+- verification completed without E2E execution:
+  - `pnpm exec playwright test e2e/accessibility-remediation.spec.ts e2e/file-attachments.spec.ts e2e/context-menus.spec.ts e2e/emoji.spec.ts e2e/my-week-stale-data.spec.ts e2e/team-mode.spec.ts --config=playwright.config.ts --list`
+  - `pnpm --filter @ship/web type-check`
+  - `pnpm build`

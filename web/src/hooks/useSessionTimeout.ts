@@ -42,6 +42,8 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
   const scheduleInactivityWarningRef = useRef<() => void>(() => {});
   // Guard to prevent duplicate extend-session API calls
   const extendingSessionRef = useRef(false);
+  // Tracks whether the user acknowledged the absolute warning (prevents re-show)
+  const absoluteAcknowledgedRef = useRef(false);
 
   // Keep onTimeout ref updated
   useEffect(() => {
@@ -94,7 +96,16 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
 
   // Reset timer - dismisses warning, resets inactivity tracking, and schedules next warning
   // Also calls the extend-session API to extend the server-side session
+  // For absolute warnings: dismiss modal but keep countdown running (session cannot be extended)
   const resetTimer = useCallback(async () => {
+    // Absolute warning: just dismiss the modal, keep countdown alive so
+    // onTimeoutRef fires when time expires and redirects to /login.
+    if (warningType === 'absolute') {
+      absoluteAcknowledgedRef.current = true;
+      setShowWarning(false);
+      return;
+    }
+
     // Prevent duplicate API calls
     if (extendingSessionRef.current) {
       return;
@@ -130,7 +141,7 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
     clearAllTimers();
     // Schedule the next inactivity warning
     scheduleInactivityWarningRef.current();
-  }, [clearAllTimers]);
+  }, [clearAllTimers, warningType]);
 
   // Schedule inactivity warning
   const scheduleInactivityWarning = useCallback(() => {
@@ -176,6 +187,9 @@ export function useSessionTimeout(onTimeout: () => void): SessionTimeoutState {
   // Schedule absolute timeout warning
   const scheduleAbsoluteWarning = useCallback(() => {
     if (!sessionCreatedAt) return;
+    // User already acknowledged the absolute warning; countdown is still running,
+    // so don't re-show the modal or create a duplicate interval.
+    if (absoluteAcknowledgedRef.current) return;
 
     if (absoluteWarningTimerRef.current) {
       clearTimeout(absoluteWarningTimerRef.current);

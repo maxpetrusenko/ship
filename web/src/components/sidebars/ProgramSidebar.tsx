@@ -89,6 +89,7 @@ export function ProgramSidebar({
           value={program.owner_id || null}
           onChange={(ownerId) => onUpdate({ owner_id: ownerId } as Partial<Program>)}
           placeholder="Select owner..."
+          ariaLabel="Owner"
         />
       </PropertyRow>
 
@@ -103,6 +104,7 @@ export function ProgramSidebar({
           value={program.accountable_id || null}
           onChange={(accountableId) => onUpdate({ accountable_id: accountableId } as Partial<Program>)}
           placeholder="Select approver..."
+          ariaLabel="Accountable"
         />
       </PropertyRow>
 

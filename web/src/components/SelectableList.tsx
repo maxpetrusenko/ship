@@ -46,6 +46,20 @@ export interface RowRenderProps {
   isFocused: boolean;
 }
 
+function buildSingleItemSelection(selection: UseSelectionReturn, itemId: string): UseSelectionReturn {
+  const selectedIds = new Set([itemId]);
+
+  return {
+    ...selection,
+    selectedIds,
+    focusedId: itemId,
+    selectedCount: 1,
+    hasSelection: true,
+    isSelected: (id: string) => id === itemId,
+    isFocused: (id: string) => id === itemId,
+  };
+}
+
 /**
  * SelectableList - Canonical component for lists with selection support
  *
@@ -93,12 +107,16 @@ export function SelectableList<T extends { id: string }>({
 
     // If right-clicked item is not selected, select only that item
     if (!selection.isSelected(itemId)) {
+      const nextSelection = buildSingleItemSelection(selection, itemId);
       selection.clearSelection();
       selection.handleClick(itemId, e);
+      onSelectionChange?.(nextSelection.selectedIds, nextSelection);
+      onContextMenu?.(e, item, nextSelection);
+      return;
     }
 
     onContextMenu?.(e, item, selection);
-  }, [getItemId, selection, onContextMenu]);
+  }, [getItemId, selection, onContextMenu, onSelectionChange]);
 
   if (loading) {
     return <SelectableListSkeleton columns={columns?.length || 5} />;

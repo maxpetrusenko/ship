@@ -4,7 +4,7 @@
  * These helpers encapsulate retry logic for common interactions that
  * fail under parallel test load due to timing issues.
  */
-import { expect, type Page, type Locator } from '@playwright/test';
+import { expect, type Page, type Locator } from "@playwright/test";
 
 /**
  * Trigger the TipTap mention autocomplete popup by typing '@' in the editor.
@@ -26,16 +26,19 @@ import { expect, type Page, type Locator } from '@playwright/test';
  * const option = page.locator('[role="option"]').filter({ hasText: 'Document Name' })
  * await option.click()
  */
-export async function triggerMentionPopup(page: Page, editor: Locator): Promise<Locator> {
+export async function triggerMentionPopup(
+  page: Page,
+  editor: Locator,
+): Promise<Locator> {
   const mentionPopup = page.locator('[role="listbox"]');
   await expect(async () => {
     await editor.click();
     await expect(editor).toBeFocused({ timeout: 3000 });
-    await page.keyboard.press('Home');
-    await page.keyboard.press('Shift+End');
-    await page.keyboard.press('Delete');
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Shift+End");
+    await page.keyboard.press("Delete");
     await page.waitForTimeout(300);
-    await page.keyboard.type('@');
+    await page.keyboard.type("@");
     await expect(mentionPopup).toBeVisible({ timeout: 5000 });
   }).toPass({ timeout: 30000, intervals: [1000, 2000, 3000, 4000, 5000] });
   return mentionPopup;
@@ -75,13 +78,13 @@ export async function hoverWithRetry(
 }
 
 /**
- * Wait for a data table to be fully loaded and stable before interacting.
+ * Wait for a data table row to be visible before interacting.
  *
  * Under parallel load, tables may render incrementally — the first few rows
  * appear, then more data arrives causing re-renders that shift row positions.
  * Interacting with rows during this unstable period causes hover/click to
- * target the wrong element. This helper waits for both the first row to
- * render AND network activity to settle.
+ * target the wrong element. This helper retries until the first row stays
+ * visible.
  *
  * @param page - The Playwright page
  * @param tableSelector - CSS selector for the table body rows (default: 'table tbody tr')
@@ -94,8 +97,31 @@ export async function hoverWithRetry(
  */
 export async function waitForTableData(
   page: Page,
-  tableSelector = 'table tbody tr',
+  tableSelector = "table tbody tr",
 ): Promise<void> {
-  await expect(page.locator(tableSelector).first()).toBeVisible({ timeout: 15000 });
-  await page.waitForLoadState('networkidle');
+  const firstRow = page.locator(tableSelector).first();
+  await expect(async () => {
+    await expect(firstRow).toBeVisible({ timeout: 5000 });
+  }).toPass({ timeout: 15000, intervals: [250, 500, 1000, 2000] });
+}
+
+/**
+ * Wait for a ProseMirror editor to mount and become interactive.
+ *
+ * Document creation/navigation can resolve before the editor is hydrated.
+ * Under load, the editor appears a bit later than the route change, so tests
+ * should wait on the actual editor node rather than guessing with sleeps.
+ */
+export async function waitForDocumentEditor(
+  page: Page,
+  editorSelector = ".ProseMirror",
+): Promise<Locator> {
+  const editor = page.locator(editorSelector).first();
+  await expect(async () => {
+    await expect(editor).toBeVisible({ timeout: 5000 });
+    await expect(editor).toHaveAttribute("contenteditable", "true", {
+      timeout: 2000,
+    });
+  }).toPass({ timeout: 30000, intervals: [500, 1000, 2000, 3000] });
+  return editor;
 }

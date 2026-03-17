@@ -4,7 +4,7 @@
  * This component consolidates the 4 type-specific sidebars into a single entry point.
  * It adapts based on document_type while maintaining the same rendering patterns.
  */
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { WikiSidebar } from '@/components/sidebars/WikiSidebar';
 import { IssueSidebar } from '@/components/sidebars/IssueSidebar';
@@ -20,6 +20,13 @@ import { cn } from '@/lib/cn';
 import type { WeeklyReviewActionsState } from '@/hooks/useWeeklyReviewActions';
 import type { Person } from '@/components/PersonCombobox';
 import type { BelongsTo, ApprovalTracking } from '@ship/shared';
+
+// Lazy-load FleetGraph panel (Agent D creates this component)
+const FleetGraphPanel = lazy(() =>
+  import('@/components/fleetgraph/FleetGraphPanel').then((m) => ({
+    default: m.FleetGraphPanel,
+  }))
+);
 
 // Document types that have properties panels
 export type PanelDocumentType = 'wiki' | 'issue' | 'project' | 'sprint' | 'program' | 'weekly_plan' | 'weekly_retro';
@@ -449,7 +456,7 @@ export function PropertiesPanel({
   highlightedFields = [],
   weeklyReviewState = null,
 }: PropertiesPanelProps) {
-  const { isWorkspaceAdmin } = useWorkspace();
+  const { isWorkspaceAdmin, currentWorkspace } = useWorkspace();
   const { user } = useAuth();
 
   // Compute canApprove: user is workspace admin OR is the accountable person
@@ -511,57 +518,96 @@ export function PropertiesPanel({
       case 'issue': {
         const issueProps = panelProps as IssuePanelProps;
         return (
-          <IssueSidebar
-            issue={document as IssueDocument}
-            teamMembers={issueProps.teamMembers || []}
-            programs={issueProps.programs || []}
-            projects={issueProps.projects || []}
-            onUpdate={onUpdate as (updates: Partial<IssueDocument>) => Promise<void>}
-            onConvert={issueProps.onConvert}
-            onUndoConversion={issueProps.onUndoConversion}
-            onAccept={issueProps.onAccept}
-            onReject={issueProps.onReject}
-            isConverting={issueProps.isConverting}
-            isUndoing={issueProps.isUndoing}
-            highlightedFields={highlightedFields}
-            onAssociationChange={issueProps.onAssociationChange}
-          />
+          <>
+            <IssueSidebar
+              issue={document as IssueDocument}
+              teamMembers={issueProps.teamMembers || []}
+              programs={issueProps.programs || []}
+              projects={issueProps.projects || []}
+              onUpdate={onUpdate as (updates: Partial<IssueDocument>) => Promise<void>}
+              onConvert={issueProps.onConvert}
+              onUndoConversion={issueProps.onUndoConversion}
+              onAccept={issueProps.onAccept}
+              onReject={issueProps.onReject}
+              isConverting={issueProps.isConverting}
+              isUndoing={issueProps.isUndoing}
+              highlightedFields={highlightedFields}
+              onAssociationChange={issueProps.onAssociationChange}
+            />
+            {currentWorkspace?.id && (
+              <div className="border-t border-border mt-4 pt-4 px-4">
+                <Suspense fallback={null}>
+                  <FleetGraphPanel
+                    entityType="issue"
+                    entityId={document.id}
+                    workspaceId={currentWorkspace.id}
+                  />
+                </Suspense>
+              </div>
+            )}
+          </>
         );
       }
 
       case 'project': {
         const projectProps = panelProps as ProjectPanelProps;
         return (
-          <ProjectSidebar
-            project={document as ProjectDocument}
-            programs={projectProps.programs || []}
-            people={projectProps.people || []}
-            onUpdate={onUpdate as (updates: Partial<ProjectDocument>) => Promise<void>}
-            onConvert={projectProps.onConvert}
-            onUndoConversion={projectProps.onUndoConversion}
-            isConverting={projectProps.isConverting}
-            isUndoing={projectProps.isUndoing}
-            highlightedFields={highlightedFields}
-            canApprove={canApprove}
-            userNames={userNames}
-            onApprovalUpdate={handleApprovalUpdate}
-          />
+          <>
+            <ProjectSidebar
+              project={document as ProjectDocument}
+              programs={projectProps.programs || []}
+              people={projectProps.people || []}
+              onUpdate={onUpdate as (updates: Partial<ProjectDocument>) => Promise<void>}
+              onConvert={projectProps.onConvert}
+              onUndoConversion={projectProps.onUndoConversion}
+              isConverting={projectProps.isConverting}
+              isUndoing={projectProps.isUndoing}
+              highlightedFields={highlightedFields}
+              canApprove={canApprove}
+              userNames={userNames}
+              onApprovalUpdate={handleApprovalUpdate}
+            />
+            {currentWorkspace?.id && (
+              <div className="border-t border-border mt-4 pt-4 px-4">
+                <Suspense fallback={null}>
+                  <FleetGraphPanel
+                    entityType="project"
+                    entityId={document.id}
+                    workspaceId={currentWorkspace.id}
+                  />
+                </Suspense>
+              </div>
+            )}
+          </>
         );
       }
 
       case 'sprint': {
         const sprintProps = panelProps as SprintPanelProps;
         return (
-          <WeekSidebar
-            sprint={document as SprintDocument}
-            onUpdate={onUpdate as (updates: Partial<SprintDocument>) => Promise<void>}
-            highlightedFields={highlightedFields}
-            people={sprintProps.people}
-            existingSprints={sprintProps.existingSprints}
-            canApprove={canApprove}
-            userNames={userNames}
-            onApprovalUpdate={handleApprovalUpdate}
-          />
+          <>
+            <WeekSidebar
+              sprint={document as SprintDocument}
+              onUpdate={onUpdate as (updates: Partial<SprintDocument>) => Promise<void>}
+              highlightedFields={highlightedFields}
+              people={sprintProps.people}
+              existingSprints={sprintProps.existingSprints}
+              canApprove={canApprove}
+              userNames={userNames}
+              onApprovalUpdate={handleApprovalUpdate}
+            />
+            {currentWorkspace?.id && (
+              <div className="border-t border-border mt-4 pt-4 px-4">
+                <Suspense fallback={null}>
+                  <FleetGraphPanel
+                    entityType="sprint"
+                    entityId={document.id}
+                    workspaceId={currentWorkspace.id}
+                  />
+                </Suspense>
+              </div>
+            )}
+          </>
         );
       }
 
@@ -600,7 +646,7 @@ export function PropertiesPanel({
           </div>
         );
     }
-  }, [document, panelProps, onUpdate, highlightedFields, canApprove, userNames, handleApprovalUpdate, weeklyReviewState]);
+  }, [document, panelProps, onUpdate, highlightedFields, canApprove, userNames, handleApprovalUpdate, weeklyReviewState, currentWorkspace?.id]);
 
   return panel;
 }

@@ -403,8 +403,13 @@ test.describe('12-Hour Absolute Timeout', () => {
     await expect(modal).toBeVisible({ timeout: 5000 });
 
     // Click "I Understand" button (button text for absolute timeout)
+    // Absolute timeout cannot be extended, so no extend-session API call is made.
+    // The countdown keeps running in the background after the modal is dismissed.
     const button = page.getByRole('button', { name: /I Understand/i });
     await button.click();
+
+    // Allow React to re-render and re-schedule the absolute warning countdown
+    await page.waitForTimeout(200);
 
     // Modal should dismiss but session still ends at 12hr mark
     // Advance remaining 5 minutes plus a buffer for logout processing

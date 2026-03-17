@@ -64,6 +64,7 @@ export function WikiSidebar({ document, teamMembers, currentUserId, onUpdate }: 
           value={maintainerId || null}
           onChange={handleMaintainerChange}
           placeholder="Select maintainer..."
+          ariaLabel="Maintainer"
         />
       </PropertyRow>
 

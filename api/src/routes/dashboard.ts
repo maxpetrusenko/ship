@@ -2,8 +2,17 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { computeICEScore } from '@ship/shared';
+import {
+  computeICEScore,
+  type DashboardIssueRow,
+  type DashboardProjectRow,
+  type DashboardSprintRow,
+  type IssueProperties,
+  type ProjectProperties,
+} from '@ship/shared';
 import { extractText } from '../utils/document-content.js';
+import { normalizeDateOnlyValue } from '../utils/dateOnly.js';
+import { loadContentFromYjsState } from '../utils/yjsConverter.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -48,7 +57,7 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
 
     // Get workspace sprint configuration to calculate current sprint number
-    const workspaceResult = await pool.query(
+    const workspaceResult = await pool.query<{ sprint_start_date: Date | string }>(
       `SELECT sprint_start_date FROM workspaces WHERE id = $1`,
       [workspaceId]
     );
@@ -58,18 +67,17 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
-    const rawStartDate = workspaceResult.rows[0].sprint_start_date;
+    const workspaceRow = workspaceResult.rows[0];
+    if (!workspaceRow) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+
+    const rawStartDate = workspaceRow.sprint_start_date;
     const sprintDuration = 7; // 7-day sprints
 
     // Calculate the current sprint number
-    let workspaceStartDate: Date;
-    if (rawStartDate instanceof Date) {
-      workspaceStartDate = new Date(Date.UTC(rawStartDate.getFullYear(), rawStartDate.getMonth(), rawStartDate.getDate()));
-    } else if (typeof rawStartDate === 'string') {
-      workspaceStartDate = new Date(rawStartDate + 'T00:00:00Z');
-    } else {
-      workspaceStartDate = new Date();
-    }
+    const workspaceStartDate = normalizeDateOnlyValue(rawStartDate);
 
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -86,7 +94,7 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
     const workItems: WorkItem[] = [];
 
     // 1. Get issues assigned to current user (not done/cancelled)
-    const issuesResult = await pool.query(
+    const issuesResult = await pool.query<DashboardIssueRow>(
       `SELECT d.id, d.title, d.properties, d.ticket_number,
               sprint_assoc.related_id as sprint_id,
               sprint.title as sprint_name,
@@ -115,7 +123,7 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
     );
 
     for (const row of issuesResult.rows) {
-      const props = row.properties || {};
+      const props: Partial<IssueProperties> = row.properties ?? {};
       const sprintNumber = row.sprint_number;
 
       // Determine urgency based on sprint status
@@ -132,12 +140,12 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
 
       workItems.push({
         id: row.id,
-        title: row.title,
+        title: row.title || 'Untitled',
         type: 'issue',
         urgency,
         state: props.state || 'backlog',
         priority: props.priority || 'medium',
-        ticket_number: row.ticket_number,
+        ticket_number: row.ticket_number ?? undefined,
         sprint_id: row.sprint_id,
         sprint_name: row.sprint_name,
         program_name: row.program_name,
@@ -145,44 +153,45 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
     }
 
     // 2. Get projects owned by current user (not archived)
-    const projectsResult = await pool.query(
-      `SELECT d.id, d.title, d.properties,
+    const projectsResult = await pool.query<DashboardProjectRow>(
+      `WITH project_status AS (
+         SELECT
+           proj_assoc.related_id AS project_id,
+           CASE MAX(
+             CASE
+               WHEN CURRENT_DATE BETWEEN
+                 (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
+                 AND (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7 + 6)
+               THEN 3
+               WHEN CURRENT_DATE < (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
+               THEN 2
+               ELSE 1
+             END
+           )
+             WHEN 3 THEN 'active'
+             WHEN 2 THEN 'planned'
+             WHEN 1 THEN 'completed'
+             ELSE NULL
+           END AS inferred_status
+         FROM documents issue
+         JOIN document_associations sprint_assoc ON sprint_assoc.document_id = issue.id AND sprint_assoc.relationship_type = 'sprint'
+         JOIN documents sprint ON sprint.id = sprint_assoc.related_id AND sprint.document_type = 'sprint'
+         JOIN document_associations proj_assoc ON proj_assoc.document_id = issue.id AND proj_assoc.relationship_type = 'project'
+         JOIN workspaces w ON w.id = issue.workspace_id
+         WHERE issue.workspace_id = $1
+           AND issue.document_type = 'issue'
+         GROUP BY proj_assoc.related_id
+       )
+       SELECT d.id, d.title, d.properties,
               p.title as program_name,
               CASE
                 WHEN d.archived_at IS NOT NULL THEN 'archived'
-                ELSE COALESCE(
-                  (
-                    SELECT
-                      CASE MAX(
-                        CASE
-                          WHEN CURRENT_DATE BETWEEN
-                            (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
-                            AND (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7 + 6)
-                          THEN 3
-                          WHEN CURRENT_DATE < (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
-                          THEN 2
-                          ELSE 1
-                        END
-                      )
-                      WHEN 3 THEN 'active'
-                      WHEN 2 THEN 'planned'
-                      WHEN 1 THEN 'completed'
-                      ELSE NULL
-                      END
-                    FROM documents issue
-                    JOIN document_associations sprint_assoc ON sprint_assoc.document_id = issue.id AND sprint_assoc.relationship_type = 'sprint'
-                    JOIN documents sprint ON sprint.id = sprint_assoc.related_id AND sprint.document_type = 'sprint'
-                    JOIN document_associations proj_assoc ON proj_assoc.document_id = issue.id AND proj_assoc.relationship_type = 'project'
-                    JOIN workspaces w ON w.id = d.workspace_id
-                    WHERE proj_assoc.related_id = d.id
-                      AND issue.document_type = 'issue'
-                  ),
-                  'backlog'
-                )
+                ELSE COALESCE(ps.inferred_status, 'backlog')
               END as inferred_status
        FROM documents d
        LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
        LEFT JOIN documents p ON prog_da.related_id = p.id AND p.document_type = 'program'
+       LEFT JOIN project_status ps ON ps.project_id = d.id
        WHERE d.workspace_id = $1
          AND d.document_type = 'project'
          AND (d.properties->>'owner_id')::uuid = $2
@@ -193,7 +202,7 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
     );
 
     for (const row of projectsResult.rows) {
-      const props = row.properties || {};
+      const props: Partial<ProjectProperties> = row.properties ?? {};
       const impact = props.impact !== undefined ? props.impact : null;
       const confidence = props.confidence !== undefined ? props.confidence : null;
       const ease = props.ease !== undefined ? props.ease : null;
@@ -208,17 +217,17 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
 
       workItems.push({
         id: row.id,
-        title: row.title,
+        title: row.title || 'Untitled',
         type: 'project',
         urgency,
         ice_score: computeICEScore(impact, confidence, ease),
-        inferred_status: row.inferred_status,
+        inferred_status: row.inferred_status ?? undefined,
         program_name: row.program_name,
       });
     }
 
     // 3. Get active sprints owned by current user
-    const sprintsResult = await pool.query(
+    const sprintsResult = await pool.query<DashboardSprintRow>(
       `SELECT d.id, d.title, d.properties,
               p.title as program_name,
               (d.properties->>'sprint_number')::int as sprint_number
@@ -240,7 +249,7 @@ router.get('/my-work', authMiddleware, async (req: Request, res: Response) => {
         title: row.title || `Week ${row.sprint_number}`,
         type: 'sprint',
         urgency: 'this_sprint',
-        sprint_number: row.sprint_number,
+        sprint_number: row.sprint_number ?? undefined,
         days_remaining: daysRemaining,
         program_name: row.program_name,
       });
@@ -350,14 +359,7 @@ router.get('/my-focus', authMiddleware, async (req: Request, res: Response) => {
     const rawStartDate = workspaceResult.rows[0].sprint_start_date;
     const sprintDuration = 7;
 
-    let workspaceStartDate: Date;
-    if (rawStartDate instanceof Date) {
-      workspaceStartDate = new Date(Date.UTC(rawStartDate.getFullYear(), rawStartDate.getMonth(), rawStartDate.getDate()));
-    } else if (typeof rawStartDate === 'string') {
-      workspaceStartDate = new Date(rawStartDate + 'T00:00:00Z');
-    } else {
-      workspaceStartDate = new Date();
-    }
+    const workspaceStartDate = normalizeDateOnlyValue(rawStartDate);
 
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -394,10 +396,10 @@ router.get('/my-focus', authMiddleware, async (req: Request, res: Response) => {
     const projectIds = allocationsResult.rows.map(r => r.project_id);
 
     // 4. Get weekly plans for current AND previous week for these projects
-    let plansResult = { rows: [] as { id: string; content: unknown; properties: Record<string, unknown> }[] };
+    let plansResult = { rows: [] as { id: string; content: unknown; yjs_state?: Buffer | null; properties: Record<string, unknown> }[] };
     if (projectIds.length > 0) {
       plansResult = await pool.query(
-        `SELECT id, content, properties
+        `SELECT id, content, yjs_state, properties
          FROM documents
          WHERE workspace_id = $1
            AND document_type = 'weekly_plan'
@@ -414,9 +416,10 @@ router.get('/my-focus', authMiddleware, async (req: Request, res: Response) => {
     for (const row of plansResult.rows) {
       const props = row.properties || {};
       const key = `${props.project_id}_${props.week_number}`;
+      const content = row.yjs_state ? loadContentFromYjsState(row.yjs_state) : row.content;
       planMap.set(key, {
         id: row.id,
-        items: extractPlanItems(row.content),
+        items: extractPlanItems(content),
       });
     }
 
@@ -531,14 +534,7 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
     const rawStartDate = workspaceResult.rows[0].sprint_start_date;
     const sprintDuration = 7;
 
-    let workspaceStartDate: Date;
-    if (rawStartDate instanceof Date) {
-      workspaceStartDate = new Date(Date.UTC(rawStartDate.getFullYear(), rawStartDate.getMonth(), rawStartDate.getDate()));
-    } else if (typeof rawStartDate === 'string') {
-      workspaceStartDate = new Date(rawStartDate + 'T00:00:00Z');
-    } else {
-      workspaceStartDate = new Date();
-    }
+    const workspaceStartDate = normalizeDateOnlyValue(rawStartDate);
 
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -565,7 +561,7 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
 
     // 3. Fetch plan for target week (by person_id + week_number only)
     const planResult = await pool.query(
-      `SELECT id, title, content, properties, created_at, updated_at
+      `SELECT id, title, content, yjs_state, properties, created_at, updated_at
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'weekly_plan'
@@ -577,18 +573,20 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
       [workspaceId, personId, targetWeekNumber]
     );
 
-    const plan = planResult.rows.length > 0
+    const planRow = planResult.rows[0];
+    const planContent = planRow?.yjs_state ? loadContentFromYjsState(planRow.yjs_state) : planRow?.content;
+    const plan = planRow
       ? {
-          id: planResult.rows[0].id,
-          title: planResult.rows[0].title,
-          submitted_at: planResult.rows[0].properties?.submitted_at || null,
-          items: extractPlanItems(planResult.rows[0].content),
+          id: planRow.id,
+          title: planRow.title,
+          submitted_at: planRow.properties?.submitted_at || null,
+          items: extractPlanItems(planContent),
         }
       : null;
 
     // 4. Fetch retro for target week
     const retroResult = await pool.query(
-      `SELECT id, title, content, properties, created_at, updated_at
+      `SELECT id, title, content, yjs_state, properties, created_at, updated_at
        FROM documents
        WHERE workspace_id = $1
          AND document_type = 'weekly_retro'
@@ -600,12 +598,14 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
       [workspaceId, personId, targetWeekNumber]
     );
 
-    const retro = retroResult.rows.length > 0
+    const retroRow = retroResult.rows[0];
+    const retroContent = retroRow?.yjs_state ? loadContentFromYjsState(retroRow.yjs_state) : retroRow?.content;
+    const retro = retroRow
       ? {
-          id: retroResult.rows[0].id,
-          title: retroResult.rows[0].title,
-          submitted_at: retroResult.rows[0].properties?.submitted_at || null,
-          items: extractPlanItems(retroResult.rows[0].content),
+          id: retroRow.id,
+          title: retroRow.title,
+          submitted_at: retroRow.properties?.submitted_at || null,
+          items: extractPlanItems(retroContent),
         }
       : null;
 

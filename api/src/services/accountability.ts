@@ -18,6 +18,7 @@ import { addBusinessDays, isBusinessDay } from '../utils/business-days.js';
 import { hasContent } from '../utils/document-content.js';
 import { getAllocations } from '../utils/allocation.js';
 import type { AccountabilityType } from '@ship/shared';
+import type { ManagerActionItem } from '../fleetgraph/data/types.js';
 
 // Accountability item returned from check
 export interface MissingAccountabilityItem {
@@ -131,6 +132,163 @@ export async function checkMissingAccountability(
     items.push(...changesRequestedItems);
   }
 
+  return items;
+}
+
+/**
+ * Returns missed-standup action items for the manager's direct reports.
+ * Shared by the route layer and FleetGraph on-demand/proactive analysis.
+ */
+export async function getManagerActionItems(
+  userId: string,
+  workspaceId: string,
+  now: Date = new Date(),
+): Promise<ManagerActionItem[]> {
+  const todayStr = now.toISOString().split('T')[0];
+  if (!todayStr) {
+    return [];
+  }
+
+  // Only surface on business days
+  if (!isBusinessDay(todayStr)) {
+    return [];
+  }
+
+  // Find the manager's person document
+  const managerPersonResult = await pool.query(
+    `SELECT id FROM documents
+     WHERE workspace_id = $1
+       AND document_type = 'person'
+       AND (properties->>'user_id')::uuid = $2
+       AND deleted_at IS NULL`,
+    [workspaceId, userId]
+  );
+
+  if (managerPersonResult.rows.length === 0) {
+    return [];
+  }
+
+  const managerPersonId = managerPersonResult.rows[0].id;
+
+  // Find direct reports: person documents where reports_to = this manager's person doc
+  const directReportsResult = await pool.query(
+    `SELECT d.id as person_doc_id,
+            d.title as employee_name,
+            d.properties->>'user_id' as employee_user_id
+     FROM documents d
+     WHERE d.workspace_id = $1
+       AND d.document_type = 'person'
+       AND d.properties->>'reports_to' = $2
+       AND d.deleted_at IS NULL`,
+    [workspaceId, managerPersonId]
+  );
+
+  if (directReportsResult.rows.length === 0) {
+    return [];
+  }
+
+  // Standup due time: 9:00 AM UTC on the current business day
+  const dueTime = new Date(`${todayStr}T09:00:00Z`);
+  const overdueMs = now.getTime() - dueTime.getTime();
+
+  // If before 9 AM UTC, no standups are due yet
+  if (overdueMs < 0) {
+    return [];
+  }
+
+  const overdueMinutes = Math.floor(overdueMs / 60_000);
+
+  // Get workspace sprint config
+  const workspaceResult = await pool.query(
+    `SELECT sprint_start_date FROM workspaces WHERE id = $1`,
+    [workspaceId]
+  );
+
+  if (workspaceResult.rows.length === 0) {
+    return [];
+  }
+
+  const rawStartDate = workspaceResult.rows[0].sprint_start_date;
+  const sprintDuration = 7;
+
+  let workspaceStartDate: Date;
+  if (rawStartDate instanceof Date) {
+    workspaceStartDate = new Date(Date.UTC(
+      rawStartDate.getFullYear(), rawStartDate.getMonth(), rawStartDate.getDate()
+    ));
+  } else if (typeof rawStartDate === 'string') {
+    workspaceStartDate = new Date(`${rawStartDate}T00:00:00Z`);
+  } else {
+    workspaceStartDate = new Date();
+  }
+
+  const today = new Date(`${todayStr}T00:00:00Z`);
+  const daysSinceStart = Math.floor(
+    (today.getTime() - workspaceStartDate.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  const currentSprintNumber = Math.floor(daysSinceStart / sprintDuration) + 1;
+
+  const items: ManagerActionItem[] = [];
+
+  for (const report of directReportsResult.rows) {
+    const empUserId = report.employee_user_id;
+    if (!empUserId) continue;
+
+    // Find active sprints where this employee has assigned issues
+    const sprintsResult = await pool.query(
+      `SELECT s.id as sprint_id, s.title as sprint_title,
+              da_proj.related_id as project_id
+       FROM documents i
+       JOIN document_associations da ON da.document_id = i.id AND da.relationship_type = 'sprint'
+       JOIN documents s ON s.id = da.related_id AND s.document_type = 'sprint'
+       LEFT JOIN document_associations da_proj ON da_proj.document_id = s.id AND da_proj.relationship_type = 'project'
+       WHERE i.workspace_id = $1
+         AND i.document_type = 'issue'
+         AND (i.properties->>'assignee_id')::uuid = $2
+         AND (s.properties->>'sprint_number')::int = $3
+         AND s.deleted_at IS NULL
+       GROUP BY s.id, s.title, da_proj.related_id`,
+      [workspaceId, empUserId, currentSprintNumber]
+    );
+
+    for (const sprint of sprintsResult.rows) {
+      // Check if standup exists for today
+      const standupResult = await pool.query(
+        `SELECT id FROM documents
+         WHERE workspace_id = $1
+           AND document_type = 'standup'
+           AND (properties->>'author_id')::uuid = $2
+           AND parent_id = $3
+           AND created_at >= $4::date
+           AND created_at < ($4::date + interval '1 day')`,
+        [workspaceId, empUserId, sprint.sprint_id, todayStr]
+      );
+
+      if (standupResult.rows.length === 0) {
+        let projectTitle: string | null = null;
+        if (sprint.project_id) {
+          const projResult = await pool.query(
+            `SELECT title FROM documents WHERE id = $1 AND deleted_at IS NULL`,
+            [sprint.project_id]
+          );
+          projectTitle = projResult.rows[0]?.title || null;
+        }
+
+        items.push({
+          employeeName: report.employee_name,
+          employeeId: empUserId,
+          dueTime: dueTime.toISOString(),
+          overdueMinutes,
+          sprintId: sprint.sprint_id,
+          sprintTitle: sprint.sprint_title || `Week ${currentSprintNumber}`,
+          projectId: sprint.project_id || null,
+          projectTitle,
+        });
+      }
+    }
+  }
+
+  items.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
   return items;
 }
 

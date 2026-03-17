@@ -17,6 +17,7 @@ import { issueKeys } from '@/hooks/useIssuesQuery';
 import { programKeys } from '@/hooks/useProgramsQuery';
 import { useStandupStatusQuery } from '@/hooks/useStandupStatusQuery';
 import { useActionItemsQuery, actionItemsKeys } from '@/hooks/useActionItemsQuery';
+import { fleetgraphKeys } from '@/hooks/useFleetGraph';
 import { useTeamMembersQuery } from '@/hooks/useTeamMembersQuery';
 import { cn, getContrastTextColor } from '@/lib/cn';
 import { buildDocumentTree, DocumentTreeNode } from '@/lib/documentTree';
@@ -36,6 +37,8 @@ import { SelectionPersistenceProvider } from '@/contexts/SelectionPersistenceCon
 import { ActionItemsModal } from '@/components/ActionItemsModal';
 import { AccountabilityBanner } from '@/components/AccountabilityBanner';
 import { ProjectContextSidebar } from '@/components/sidebars/ProjectContextSidebar';
+import { FleetGraphFloatingChat } from '@/components/fleetgraph/FleetGraphFloatingChat';
+import FleetGraphNotificationBell from '@/components/fleetgraph/FleetGraphNotificationBell';
 
 type Mode = 'docs' | 'issues' | 'projects' | 'programs' | 'sprints' | 'team' | 'settings' | 'dashboard' | 'project-context';
 
@@ -104,6 +107,15 @@ export function AppLayout() {
   }, [queryClient]);
 
   useRealtimeEvent('accountability:updated', handleAccountabilityUpdate);
+
+  // Listen for realtime FleetGraph alerts - only invalidate status here;
+  // FleetGraphPanel handles its own scoped alerts invalidation to avoid
+  // duplicate/unrelated refetches across all entity panels.
+  const handleFleetGraphAlert = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: fleetgraphKeys.status() });
+  }, [queryClient]);
+
+  useRealtimeEvent('fleetgraph:alert', handleFleetGraphAlert);
 
   // Cleanup celebration timeout on unmount
   useEffect(() => {
@@ -401,6 +413,7 @@ export function AppLayout() {
 
           {/* User avatar & settings at bottom */}
           <div className="flex flex-col items-center gap-2">
+            <FleetGraphNotificationBell />
             <RailIcon
               icon={<SettingsIcon />}
               label="Settings"
@@ -575,6 +588,9 @@ export function AppLayout() {
         open={actionItemsModalOpen}
         onClose={() => setActionItemsModalOpen(false)}
       />
+
+      {/* Floating FleetGraph chat widget - always accessible */}
+      <FleetGraphFloatingChat />
     </div>
     </SelectionPersistenceProvider>
     </TooltipProvider>

@@ -7,7 +7,10 @@
 
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { checkMissingAccountability } from '../services/accountability.js';
+import {
+  checkMissingAccountability,
+  getManagerActionItems,
+} from '../services/accountability.js';
 
 const router = Router();
 
@@ -98,6 +101,32 @@ router.get('/action-items', authMiddleware, async (req: Request, res: Response) 
     });
   } catch (err) {
     console.error('Get accountability action items error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/accountability/manager-action-items
+ *
+ * Returns missed-standup action items for the authenticated manager's direct reports.
+ * Uses the reports_to hierarchy on person documents to determine direct reports.
+ * Only returns items on business days where the standup window has passed.
+ *
+ * Each item includes:
+ * - employeeName, employeeId: the direct report
+ * - dueTime: when the standup was due (start of business day)
+ * - overdueMinutes: how many minutes past due
+ * - sprintId, sprintTitle: the sprint missing the standup
+ * - projectId, projectTitle: associated project (if any)
+ */
+router.get('/manager-action-items', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const workspaceId = req.workspaceId!;
+    const items = await getManagerActionItems(userId, workspaceId);
+    res.json({ items, total: items.length });
+  } catch (err) {
+    console.error('Get manager action items error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

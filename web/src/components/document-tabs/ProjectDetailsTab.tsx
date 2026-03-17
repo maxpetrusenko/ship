@@ -215,7 +215,7 @@ export default function ProjectDetailsTab({ documentId, document }: DocumentTabP
     confidence: (document.confidence as number | null) ?? null,
     ease: (document.ease as number | null) ?? null,
     color: (document.color as string) || '#3b82f6',
-    emoji: null,
+    emoji: (document.emoji as string) || null,
     program_id: programId,
     owner: document.owner as { id: string; name: string; email: string } | null,
     owner_id: document.owner_id as string | undefined,

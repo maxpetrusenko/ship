@@ -30,6 +30,8 @@
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
     "test": "pnpm --filter @ship/api test",
     "test:e2e": "playwright test",
+    "test:e2e:isolated": "playwright test --config=playwright.isolated.config.ts",
+    "test:e2e:preflight": "node scripts/playwright-preflight.mjs",
     "test:e2e:ui": "playwright test --ui",
     "track:agent-usage": "node scripts/track-agent-usage.js",
     "worktree:init": "./scripts/worktree-init.sh",

@@ -10,7 +10,7 @@ import {
 import { useAuth } from './useAuth';
 
 // Event types that can be received from the server
-export type RealtimeEventType = 'accountability:updated' | 'connected' | 'pong';
+export type RealtimeEventType = 'accountability:updated' | 'fleetgraph:alert' | 'connected' | 'pong';
 
 export interface RealtimeEvent {
   type: RealtimeEventType;

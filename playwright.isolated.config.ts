@@ -8,8 +8,8 @@
  * The main playwright.config.ts is the production config.
  */
 
-import { defineConfig, devices } from '@playwright/test';
-import os from 'os';
+import { defineConfig, devices } from "@playwright/test";
+import os from "os";
 
 // Calculate safe worker count (same logic as main config)
 function getWorkerCount(): number {
@@ -21,30 +21,33 @@ function getWorkerCount(): number {
   const freeMemGB = os.freemem() / (1024 * 1024 * 1024);
   const memoryBasedLimit = Math.floor((freeMemGB - 2) / 0.5);
   const cpuCores = os.cpus().length;
-  return Math.max(1, Math.min(memoryBasedLimit, cpuCores));
+  const localWorkerCap = 4;
+  return Math.max(1, Math.min(memoryBasedLimit, cpuCores, localWorkerCap));
 }
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: "./e2e",
   // Only run tests that use the isolated fixture
-  testMatch: ['**/spike-isolated.spec.ts'],
+  testMatch: ["**/spike-isolated.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: getWorkerCount(),
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }], ["./e2e/progress-reporter.ts"]]
+    : [["list"], ["html", { open: "never" }], ["./e2e/progress-reporter.ts"]],
   use: {
     // baseURL is provided by the isolated-env fixture
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
   },
-  timeout: 60000, // Longer timeout for container startup
+  timeout: 120000, // Longer timeout for container startup and worker-scoped isolated fixtures
   // Global setup builds API and Web once
-  globalSetup: './e2e/global-setup.ts',
+  globalSetup: "./e2e/global-setup.ts",
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
   // NO webServer - the fixture handles server startup per worker

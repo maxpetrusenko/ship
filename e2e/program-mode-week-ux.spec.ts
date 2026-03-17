@@ -377,7 +377,7 @@ test.describe('Phase 2: Weeks Tab UI', () => {
       await sprintCard.click()
       // Clicking a sprint card navigates to /documents/{id}/sprints/{sprintId}
       // Wait for URL to update which indicates selection worked
-      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/sprints\/[a-f0-9-]+/, { timeout: 5000 })
+      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/weeks\/[a-f0-9-]+/, { timeout: 5000 })
       // After navigation, verify a card shows as selected
       await expect(page.locator('button[data-selected="true"]')).toBeVisible({ timeout: 5000 })
     } else {
@@ -396,7 +396,7 @@ test.describe('Phase 2: Weeks Tab UI', () => {
     if (cardCount > 0) {
       await sprintCard.dblclick()
       // Application navigates to /documents/{programId}/sprints/{sprintId}
-      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/sprints\/[a-f0-9-]+/, { timeout: 5000 })
+      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/weeks\/[a-f0-9-]+/, { timeout: 5000 })
     } else {
       // No sprint documents - verify timeline displays week windows
       await expect(page.getByText(/Week of/).first()).toBeVisible()
@@ -412,7 +412,7 @@ test.describe('Phase 2: Weeks Tab UI', () => {
     if (await completedCard.isVisible().catch(() => false)) {
       await completedCard.dblclick()
       // Application navigates to /documents/{programId}/sprints/{sprintId}
-      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/sprints\/[a-f0-9-]+/, { timeout: 5000 })
+      await expect(page).toHaveURL(/\/documents\/[a-f0-9-]+\/weeks\/[a-f0-9-]+/, { timeout: 5000 })
     }
     // If no completed sprint exists, test passes (conditional test)
   })
@@ -692,8 +692,8 @@ test.describe('Phase 4: Issues Tab Filtering', () => {
     await expect(firstRow).toBeVisible({ timeout: 5000 })
     await firstRow.hover()
 
-    // Now checkbox should be visible in the data cell
-    await expect(page.locator('td').getByRole('checkbox').first()).toBeVisible({ timeout: 5000 })
+    // Now checkbox should be visible for that row specifically
+    await expect(firstRow.getByRole('checkbox', { name: /select item/i })).toBeVisible({ timeout: 5000 })
   })
 
   test('selecting issues shows bulk action bar', async ({ page }) => {

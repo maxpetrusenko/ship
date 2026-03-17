@@ -5,6 +5,7 @@
  * Errors are written to separate files to avoid output explosion.
  *
  * Progress file: test-results/progress.jsonl
+ * Timing aggregate file: test-results/spec-timings.json
  * Error logs: test-results/errors/{test-file}.log
  */
 
@@ -31,11 +32,24 @@ interface ProgressEntry {
 const RESULTS_DIR = 'test-results';
 const PROGRESS_FILE = path.join(RESULTS_DIR, 'progress.jsonl');
 const ERRORS_DIR = path.join(RESULTS_DIR, 'errors');
+const SPEC_TIMINGS_FILE = path.join(RESULTS_DIR, 'spec-timings.json');
 
 const SUMMARY_FILE = path.join(RESULTS_DIR, 'summary.json');
 
+interface SpecTimingAggregate {
+  spec: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  totalDurationMs: number;
+  averageDurationMs: number;
+  slowestTestDurationMs: number;
+}
+
 class ProgressReporter implements Reporter {
   private totalTests = 0;
+  private specTimings = new Map<string, SpecTimingAggregate>();
 
   onBegin(config: FullConfig, suite: Suite): void {
     // Ensure directories exist
@@ -86,6 +100,7 @@ class ProgressReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult): void {
     const testFile = this.getTestFile(test);
     const status = this.mapStatus(result.status);
+    this.trackSpecTiming(testFile, status, result.duration);
 
     const entry: ProgressEntry = {
       test: testFile,
@@ -115,6 +130,8 @@ class ProgressReporter implements Reporter {
       status: result.status === 'passed' ? 'passed' : 'failed',
       ts: Date.now(),
     });
+
+    this.writeSpecTimings();
   }
 
   private updateSummaryCounter(status: 'passed' | 'failed' | 'skipped'): void {
@@ -167,6 +184,34 @@ class ProgressReporter implements Reporter {
     }
   }
 
+  private trackSpecTiming(
+    spec: string,
+    status: 'passed' | 'failed' | 'skipped',
+    duration = 0
+  ): void {
+    const previous = this.specTimings.get(spec) ?? {
+      spec,
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      totalDurationMs: 0,
+      averageDurationMs: 0,
+      slowestTestDurationMs: 0,
+    };
+
+    previous.total += 1;
+    previous.totalDurationMs += duration;
+    previous.slowestTestDurationMs = Math.max(previous.slowestTestDurationMs, duration);
+
+    if (status === 'passed') previous.passed += 1;
+    else if (status === 'failed') previous.failed += 1;
+    else previous.skipped += 1;
+
+    previous.averageDurationMs = previous.total > 0 ? previous.totalDurationMs / previous.total : 0;
+    this.specTimings.set(spec, previous);
+  }
+
   private writeProgress(entry: ProgressEntry): void {
     fs.appendFileSync(PROGRESS_FILE, JSON.stringify(entry) + '\n');
   }
@@ -192,6 +237,17 @@ class ProgressReporter implements Reporter {
 
     fs.writeFileSync(errorPath, errorContent);
     return errorFileName;
+  }
+
+  private writeSpecTimings(): void {
+    const entries = Array.from(this.specTimings.values())
+      .sort((a, b) => b.totalDurationMs - a.totalDurationMs || b.slowestTestDurationMs - a.slowestTestDurationMs || a.spec.localeCompare(b.spec))
+      .map((entry) => ({
+        ...entry,
+        averageDurationMs: Number(entry.averageDurationMs.toFixed(2)),
+      }));
+
+    fs.writeFileSync(SPEC_TIMINGS_FILE, JSON.stringify(entries, null, 2));
   }
 }
 

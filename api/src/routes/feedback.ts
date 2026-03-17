@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
+import type { FeedbackRow, IssueProperties } from '@ship/shared';
 
 type RouterType = ReturnType<typeof Router>;
 
@@ -24,8 +25,8 @@ const rejectFeedbackSchema = z.object({
 });
 
 // Helper to extract feedback from row
-function extractFeedbackFromRow(row: any, programPrefix?: string | null) {
-  const props = row.properties || {};
+function extractFeedbackFromRow(row: FeedbackRow, programPrefix?: string | null) {
+  const props: Partial<IssueProperties> = row.properties ?? {};
   return {
     id: row.id,
     title: row.title,
@@ -44,7 +45,7 @@ function extractFeedbackFromRow(row: any, programPrefix?: string | null) {
     program_prefix: row.program_prefix || programPrefix,
     program_color: row.program_color,
     created_by_name: row.created_by_name,
-    display_id: `#${row.ticket_number}`,
+    display_id: `#${row.ticket_number ?? '0'}`,
   };
 }
 

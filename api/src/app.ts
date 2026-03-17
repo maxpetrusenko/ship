@@ -31,6 +31,8 @@ import dashboardRoutes from './routes/dashboard.js';
 import associationsRoutes from './routes/associations.js';
 import accountabilityRoutes from './routes/accountability.js';
 import aiRoutes from './routes/ai.js';
+import { fleetgraphRoutes } from './routes/fleetgraph.js';
+import { githubWebhookRoutes } from './routes/github-webhook.js';
 import weeklyPlansRoutes, { weeklyRetrosRouter } from './routes/weekly-plans.js';
 import { documentCommentsRouter, commentsRouter } from './routes/comments.js';
 import { setupSwagger } from './swagger.js';
@@ -139,7 +141,13 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     origin: corsOrigin,
     credentials: true,
   }));
-  app.use(express.json({ limit: '10mb' }));  // Large wiki documents can be several MB
+  // Store rawBody for HMAC verification (GitHub webhooks)
+  app.use(express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => {
+      (req as Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' })); // For HTML form submissions
   app.use(cookieParser(sessionSecret));
 
@@ -174,6 +182,9 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // Public feedback routes - no auth or CSRF required (must be before protected routes)
   app.use('/api/feedback', publicFeedbackRouter);
+
+  // GitHub webhook - no auth/CSRF (uses HMAC signature verification)
+  app.use('/api/webhooks/github', githubWebhookRoutes);
 
   // Apply stricter rate limiting to login endpoint (brute force protection)
   app.use('/api/auth/login', loginLimiter);
@@ -213,6 +224,9 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // AI analysis routes - plan and retro quality feedback (CSRF protected)
   app.use('/api/ai', conditionalCsrf, aiRoutes);
+
+  // FleetGraph routes - proactive monitoring and on-demand analysis (CSRF protected for POST)
+  app.use('/api/fleetgraph', conditionalCsrf, fleetgraphRoutes);
 
   // Weekly plans routes - per-person accountability documents (CSRF protected)
   app.use('/api/weekly-plans', conditionalCsrf, weeklyPlansRoutes);

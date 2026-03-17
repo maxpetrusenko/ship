@@ -334,6 +334,73 @@ CREATE TABLE IF NOT EXISTS comments (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- FleetGraph alerts table: deduplicated, snoozable alert state
+CREATE TABLE IF NOT EXISTS fleetgraph_alerts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  signal_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id UUID NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'medium',
+  summary TEXT NOT NULL,
+  recommendation TEXT NOT NULL DEFAULT '',
+  citations JSONB NOT NULL DEFAULT '[]',
+  owner_user_id UUID REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'active',
+  snoozed_until TIMESTAMPTZ,
+  last_surfaced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- FleetGraph audit log: one row per graph run for observability
+CREATE TABLE IF NOT EXISTS fleetgraph_audit_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id UUID,
+  branch TEXT NOT NULL,
+  candidate_count INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  token_usage JSONB,
+  trace_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- FleetGraph entity digest cache: skip re-analysis when entity unchanged
+CREATE TABLE IF NOT EXISTS fleetgraph_entity_digests (
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  entity_type TEXT NOT NULL,
+  entity_id UUID NOT NULL,
+  digest TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (workspace_id, entity_type, entity_id)
+);
+
+-- FleetGraph approvals table: HITL gate decisions for consequential actions
+CREATE TABLE IF NOT EXISTS fleetgraph_approvals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  alert_id UUID NOT NULL REFERENCES fleetgraph_alerts(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  checkpoint_id TEXT,
+  action_type TEXT NOT NULL,
+  target_entity_type TEXT NOT NULL,
+  target_entity_id UUID NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  payload JSONB NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  decided_by UUID REFERENCES users(id),
+  decided_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '72 hours'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
@@ -439,6 +506,26 @@ CREATE INDEX IF NOT EXISTS idx_document_links_source ON document_links(source_id
 CREATE INDEX IF NOT EXISTS idx_comments_document_id ON comments(document_id);
 CREATE INDEX IF NOT EXISTS idx_comments_comment_id ON comments(comment_id);
 CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
+
+-- FleetGraph alerts indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fleetgraph_alerts_fingerprint
+  ON fleetgraph_alerts(workspace_id, fingerprint) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_alerts_entity
+  ON fleetgraph_alerts(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_alerts_status
+  ON fleetgraph_alerts(status, workspace_id);
+
+-- FleetGraph audit log indexes
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_audit_workspace
+  ON fleetgraph_audit_log(workspace_id, created_at DESC);
+
+-- FleetGraph approvals indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fleetgraph_approvals_pending
+  ON fleetgraph_approvals(alert_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_approvals_workspace
+  ON fleetgraph_approvals(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_approvals_expires
+  ON fleetgraph_approvals(expires_at) WHERE status = 'pending';
 
 -- Drop the legacy separate tables if they exist (greenfield cleanup)
 DROP TABLE IF EXISTS sprints CASCADE;

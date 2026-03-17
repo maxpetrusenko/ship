@@ -73,6 +73,7 @@ const updateDocumentSchema = z.object({
   confidence: z.number().min(1).max(10).nullable().optional(),
   ease: z.number().min(1).max(10).nullable().optional(),
   color: z.string().optional(),
+  emoji: z.string().max(10).optional().nullable(),
   owner_id: z.string().uuid().nullable().optional(),
   has_design_review: z.boolean().nullable().optional(),
   design_review_notes: z.string().max(2000).nullable().optional(),
@@ -143,6 +144,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
         source: props.source,
         prefix: props.prefix,
         color: props.color,
+        emoji: props.emoji || null,
       };
     });
 
@@ -352,6 +354,7 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
       // Generic properties
       prefix: props.prefix,
       color: props.color,
+      emoji: props.emoji || null,
       // Sprint properties (dates computed from sprint_number + workspace.sprint_start_date)
       status: props.status,
       plan: props.plan,
@@ -697,6 +700,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     if (data.confidence !== undefined) topLevelProps.confidence = data.confidence;
     if (data.ease !== undefined) topLevelProps.ease = data.ease;
     if (data.color !== undefined) topLevelProps.color = data.color;
+    if (data.emoji !== undefined) topLevelProps.emoji = data.emoji;
     if (data.owner_id !== undefined) topLevelProps.owner_id = data.owner_id;
     // RACI fields for projects
     if (data.accountable_id !== undefined) topLevelProps.accountable_id = data.accountable_id;
@@ -1082,6 +1086,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
       // Generic properties
       prefix: props.prefix,
       color: props.color,
+      emoji: props.emoji || null,
       // Sprint properties (dates computed from sprint_number + workspace.sprint_start_date)
       status: props.status,
       plan: props.plan,
@@ -1327,6 +1332,7 @@ router.post('/:id/convert', authMiddleware, async (req: Request, res: Response) 
         confidence: props.confidence,
         ease: props.ease,
         color: props.color,
+        emoji: props.emoji || null,
         owner_id: props.owner_id,
       }),
       program_id: props.program_id,
@@ -1493,6 +1499,7 @@ router.post('/:id/undo-conversion', authMiddleware, async (req: Request, res: Re
         confidence: props.confidence,
         ease: props.ease,
         color: props.color,
+        emoji: props.emoji || null,
         owner_id: props.owner_id,
       }),
       program_id: props.program_id,

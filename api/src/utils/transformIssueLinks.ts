@@ -10,19 +10,7 @@
  */
 
 import { pool } from '../db/client.js';
-
-interface TipTapNode {
-  type: string;
-  content?: TipTapNode[];
-  text?: string;
-  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
-  attrs?: Record<string, unknown>;
-}
-
-interface TipTapDoc {
-  type: 'doc';
-  content?: TipTapNode[];
-}
+import { isTipTapDoc, type TipTapDoc, type TipTapNode } from '@ship/shared';
 
 interface IssueInfo {
   id: string;
@@ -204,10 +192,9 @@ export async function transformIssueLinks(
   workspaceId: string,
   preloadedIssueMap?: Map<number, IssueInfo>
 ): Promise<unknown> {
-  if (!content || typeof content !== 'object') return content;
+  if (!isTipTapDoc(content)) return content;
 
-  const doc = content as TipTapDoc;
-  if (doc.type !== 'doc' || !Array.isArray(doc.content)) return content;
+  const doc: TipTapDoc = content;
 
   // Extract all ticket numbers from content
   const ticketNumbers = extractAllTicketNumbers(doc.content);
@@ -248,10 +235,9 @@ export function extractTicketNumbersFromContents(contents: unknown[]): number[] 
   const allNumbers: number[] = [];
 
   for (const content of contents) {
-    if (!content || typeof content !== 'object') continue;
+    if (!isTipTapDoc(content)) continue;
 
-    const doc = content as TipTapDoc;
-    if (doc.type !== 'doc' || !Array.isArray(doc.content)) continue;
+    const doc: TipTapDoc = content;
 
     allNumbers.push(...extractAllTicketNumbers(doc.content));
   }

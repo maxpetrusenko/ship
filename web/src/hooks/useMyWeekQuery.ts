@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '@/lib/api';
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/api";
 
 export interface StandupSlot {
   date: string;
@@ -51,20 +51,29 @@ export interface MyWeekResponse {
 }
 
 async function fetchMyWeek(weekNumber?: number): Promise<MyWeekResponse> {
-  const params = weekNumber ? `?week_number=${weekNumber}` : '';
+  const params = weekNumber ? `?week_number=${weekNumber}` : "";
   const res = await apiGet(`/api/dashboard/my-week${params}`);
   if (!res.ok) {
-    const error = new Error('Failed to fetch my week data') as Error & { status: number };
+    const error = new Error("Failed to fetch my week data") as Error & {
+      status: number;
+    };
     error.status = res.status;
     throw error;
   }
   return res.json();
 }
 
+export const myWeekKeys = {
+  all: ["dashboard", "my-week"] as const,
+  week: (weekNumber?: number) =>
+    [...myWeekKeys.all, weekNumber ?? "current"] as const,
+};
+
 export function useMyWeekQuery(weekNumber?: number) {
   return useQuery({
-    queryKey: ['dashboard', 'my-week', weekNumber ?? 'current'],
+    queryKey: myWeekKeys.week(weekNumber),
     queryFn: () => fetchMyWeek(weekNumber),
     staleTime: 0, // Always refetch on mount — plan/retro content is saved via Yjs WebSocket so there's no client-side mutation to trigger invalidation
+    refetchOnMount: "always",
   });
 }

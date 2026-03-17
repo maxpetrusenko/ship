@@ -8,6 +8,16 @@ beforeAll(async () => {
   // Ensure test environment
   process.env.NODE_ENV = 'test'
 
+  // Guard: refuse to truncate the dev database (tests must use a _test suffix db)
+  const dbUrl = process.env.DATABASE_URL || ''
+  const dbName = dbUrl.split('/').pop()?.split('?')[0] || ''
+  if (dbName && !dbName.endsWith('_test')) {
+    throw new Error(
+      `Refusing to TRUNCATE non-test database "${dbName}". ` +
+      `Set DATABASE_URL to a _test database (e.g. ${dbName}_test) or run: pnpm test`
+    )
+  }
+
   // Clean up test data from previous runs to prevent duplicate key errors
   // Use TRUNCATE CASCADE which is faster and bypasses row-level triggers
   // (audit_logs has AU-9 compliance triggers preventing DELETE)

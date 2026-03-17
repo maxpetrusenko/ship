@@ -12,6 +12,7 @@ import {
   type BelongsToEntry,
 } from '../utils/document-crud.js';
 import { broadcastToUser } from '../collaboration/index.js';
+import { getScheduler } from '../fleetgraph/runtime/index.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -1028,6 +1029,28 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
       if (props.source === 'action_items') {
         const assigneeId = props.assignee_id || req.userId;
         broadcastToUser(assigneeId, 'accountability:updated', { issueId: id, state: data.state });
+      }
+    }
+
+    // Fire-and-forget: enqueue FleetGraph analysis when key fields change
+    const fleetgraphTriggerFields = ['state', 'priority', 'assignee_id'];
+    const hasFleetGraphTrigger = changes.some((c) => fleetgraphTriggerFields.includes(c.field));
+    if (hasFleetGraphTrigger) {
+      try {
+        const scheduler = getScheduler();
+        if (scheduler) {
+          const queue = scheduler.getQueue();
+          const enqueued = queue.enqueue({
+            workspaceId,
+            mode: 'proactive',
+            entityType: 'issue',
+            entityId: id,
+          });
+          console.log(`[FleetGraph] Issue update trigger: ${id} fields=[${changes.map(c => c.field).join(',')}] enqueued=${enqueued}`);
+        }
+      } catch (err) {
+        // Non-critical: log and continue
+        console.error('[FleetGraph] Issue update trigger failed:', err);
       }
     }
 

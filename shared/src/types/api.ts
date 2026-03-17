@@ -11,3 +11,16 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 
+export interface ApiSuccess<T = unknown> {
+  status: 'success';
+  data: T;
+}
+
+export interface ApiFailure<E extends ApiError = ApiError> {
+  status: 'error';
+  error: E;
+}
+
+export type ApiResult<T = unknown, E extends ApiError = ApiError> =
+  | ApiSuccess<T>
+  | ApiFailure<E>;
