@@ -36,6 +36,8 @@ Thumbs.db
 
 # Local agent state
 .agents/
+.agent/
+.factory/
 .claude/
 .codex/
 /agents/
