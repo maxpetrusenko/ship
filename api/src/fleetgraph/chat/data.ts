@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import {
   loadCurrentSprintNumber,
+  loadVisibleDocumentContent,
   loadExistingSprintReview,
   loadIssueChildren,
   loadIssueHistory,
@@ -28,6 +29,7 @@ import {
   detectProjectDrift,
   summarizeAccountability,
   summarizeAssociations,
+  summarizeDocumentContent,
   summarizeIssueChildren,
   summarizeIssueHistory,
   summarizeManagerItems,
@@ -310,6 +312,29 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
         documentId,
         relationshipType: relationshipType ?? null,
         relatedDocuments: summarizeAssociations(associations),
+      };
+    },
+
+    async fetchDocumentContent(context: FleetGraphChatToolContext, args: Record<string, unknown>) {
+      const documentId = typeof args.documentId === 'string' && args.documentId.trim()
+        ? args.documentId
+        : context.pageContext?.documentId ?? context.entityId;
+      const visibility = await loadVisibility(context);
+      const document = await loadVisibleDocumentContent(context, documentId, visibility);
+
+      if (!document) {
+        return {
+          found: false,
+          documentId,
+        };
+      }
+
+      return {
+        found: true,
+        documentId: document.id,
+        documentType: document.document_type,
+        title: document.title,
+        contentText: summarizeDocumentContent(document.content, 1200),
       };
     },
   };

@@ -16,6 +16,7 @@ export function formatPageContextHint(pageContext: FleetGraphChatHintContext | n
     `surface=${pageContext.surface}`,
     pageContext.documentId ? `documentId=${pageContext.documentId}` : null,
     pageContext.title ? `title=${pageContext.title}` : null,
+    pageContext.visibleContentText ? `visibleContentText=${pageContext.visibleContentText}` : null,
     pageContext.tab ? `tab=${pageContext.tab}` : null,
     pageContext.tabLabel ? `tabLabel=${pageContext.tabLabel}` : null,
   ].filter(Boolean);
@@ -44,6 +45,8 @@ export function buildFleetGraphChatInstructions(args: {
     'Decline requests for secrets, credentials, env vars, database access, deployment internals, or infrastructure internals.',
     'If the user asks what page they are on, answer from pageContext directly.',
     'If the user asks about an issue or ticket and the active entity is an issue, call fetch_issue_context before answering.',
+    'If the user asks what is written on the current page, asks for the current page code, or asks for document body text, call fetch_document_content before answering.',
+    'When a document page is active, interpret ambiguous references like "the code" or "this page" as document content first, not ticket number or system secrets.',
     'If the user asks for deeper project, sprint, issue, drift, workspace, or related-document context, call the matching tool.',
     'If the request is on-topic but data is missing, call the best matching tool and say what is missing.',
     'If the request is off-topic, decline in one short sentence and redirect to Ship work.',

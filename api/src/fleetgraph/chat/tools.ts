@@ -20,6 +20,7 @@ const TOOL_METHODS = {
   fetch_workspace_signals: 'fetchWorkspaceSignals',
   fetch_entity_drift: 'fetchEntityDrift',
   fetch_related_documents: 'fetchRelatedDocuments',
+  fetch_document_content: 'fetchDocumentContent',
 } as const satisfies Record<FleetGraphChatToolName, keyof FleetGraphChatDataAccess>;
 
 const TOOL_DEFINITIONS: Record<FleetGraphChatToolName, ToolDefinition> = {
@@ -126,6 +127,23 @@ const TOOL_DEFINITIONS: Record<FleetGraphChatToolName, ToolDefinition> = {
     },
     description: 'Fetch related documents or associations for the active entity or a supplied document.',
   },
+  fetch_document_content: {
+    schema: {
+      type: 'function',
+      name: 'fetch_document_content',
+      description: 'Fetch the active document body text for the current page or a supplied document.',
+      strict: true,
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          documentId: { type: 'string' },
+        },
+        required: ['documentId'],
+      },
+    },
+    description: 'Fetch the active document body text for the current page or a supplied document.',
+  },
 };
 
 export function getFleetGraphChatToolSchemas(): FleetGraphFunctionToolSchema[] {
@@ -200,6 +218,9 @@ export function resolveToolInput(args: {
   }
   if (args.name === 'fetch_related_documents' && !('relationshipType' in parsed)) {
     parsed.relationshipType = null;
+  }
+  if (args.name === 'fetch_document_content' && !readString(parsed, 'documentId')) {
+    parsed.documentId = args.context.pageContext?.documentId ?? args.context.entityId;
   }
 
   return parsed;

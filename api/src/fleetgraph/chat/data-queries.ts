@@ -1,5 +1,6 @@
 import { pool } from '../../db/client.js';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../../middleware/visibility.js';
+import { loadContentFromYjsState } from '../../utils/yjsConverter.js';
 import type { FleetGraphChatToolContext } from './types.js';
 import { asRecord, type IssueChildRow, type IssueHistoryRow, type IssueRow, type ProjectRow, type RelatedDocumentRow } from './data-utils.js';
 
@@ -18,6 +19,13 @@ export interface SprintBaseRow {
   project_plan: string | null;
   program_id: string | null;
   program_name: string | null;
+}
+
+export interface VisibleDocumentContentRow {
+  id: string;
+  title: string;
+  document_type: string;
+  content: unknown;
 }
 
 export async function loadVisibility(context: FleetGraphChatToolContext): Promise<VisibilityContext> {
@@ -100,6 +108,36 @@ export async function loadVisibleProject(
   );
 
   return result.rows[0] ?? null;
+}
+
+export async function loadVisibleDocumentContent(
+  context: FleetGraphChatToolContext,
+  documentId: string,
+  visibility: VisibilityContext,
+): Promise<VisibleDocumentContentRow | null> {
+  const result = await pool.query(
+    `SELECT d.id, d.title, d.document_type, d.content, d.yjs_state
+     FROM documents d
+     WHERE d.id = $1
+       AND d.workspace_id = $2
+       AND d.deleted_at IS NULL
+       AND d.archived_at IS NULL
+       AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
+    [documentId, context.workspaceId, context.userId, visibility.isAdmin],
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  const content = row.content ?? (row.yjs_state ? loadContentFromYjsState(row.yjs_state) : null);
+  return {
+    id: row.id,
+    title: row.title,
+    document_type: row.document_type,
+    content,
+  };
 }
 
 export async function loadVisibleAssociations(

@@ -68,6 +68,35 @@ const QUICK_PROMPTS: Record<string, string[]> = {
 
 const LOG_PREFIX = '[FleetGraph:Chat]';
 
+function getVisibleEditorText(): string | undefined {
+  if (typeof document === 'undefined') {
+    return undefined;
+  }
+
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('.ProseMirror'))
+    .map((node) => node.innerText.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  return candidates[0] || undefined;
+}
+
+function buildLivePageContext(pageContext?: FleetGraphPageContext): FleetGraphPageContext | undefined {
+  if (!pageContext) {
+    return undefined;
+  }
+
+  const visibleContentText = getVisibleEditorText();
+  if (!visibleContentText) {
+    return pageContext;
+  }
+
+  return {
+    ...pageContext,
+    visibleContentText,
+  };
+}
+
 interface AssessmentResultProps {
   assessment: FleetGraphAssessment;
   /** Callback to execute an action (approve/dismiss) on the proposed action's alert. */
@@ -537,13 +566,14 @@ export function FleetGraphChat({
     setQuestion('');
 
     try {
+      const livePageContext = buildLivePageContext(pageContext);
       const result = await chat.mutateAsync({
         entityType,
         entityId,
         workspaceId,
         question: q.trim(),
         threadId: threadId ?? undefined,
-        pageContext,
+        pageContext: livePageContext,
       });
 
       // Discard result if entity changed while request was in-flight

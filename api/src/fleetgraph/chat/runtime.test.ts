@@ -96,6 +96,15 @@ function createData(overrides: Partial<FleetGraphChatDataAccess> = {}): FleetGra
         relatedDocuments: [],
       };
     },
+    async fetchDocumentContent(_context, args) {
+      return {
+        found: true,
+        documentId: args.documentId,
+        documentType: 'issue',
+        title: 'Issue title',
+        contentText: 'code is 123',
+      };
+    },
     ...overrides,
   };
 }
@@ -215,6 +224,67 @@ describe('runFleetGraphChat', () => {
     });
     expect(client.calls).toHaveLength(2);
     expect(client.calls[0]?.tools).toBeTruthy();
+  });
+
+  it('answers current-page content questions directly from document body context', async () => {
+    const client = createClient([]);
+    const result = await runFleetGraphChat(makeRequest({
+      question: 'what is the code?',
+    }), {
+      client,
+      data: createData(),
+      model: 'gpt-5.3-chat-latest',
+      maxSteps: 3,
+    });
+
+    expect(result.assessment.summary).toBe('The code is 123.');
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.name).toBe('fetch_document_content');
+    expect(result.toolCalls[0]?.callId).toBe('direct-page-content');
+    expect(result.toolCalls[0]?.arguments).toEqual({ documentId: 'iss-1' });
+    expect(result.toolCalls[0]?.result).toEqual({
+      found: true,
+      documentId: 'iss-1',
+      documentType: 'issue',
+      title: 'Issue title',
+      contentText: 'code is 123',
+    });
+    expect(client.calls).toEqual([]);
+  });
+
+  it('prefers live page content over persisted server content for current-page questions', async () => {
+    const client = createClient([]);
+    const data = createData({
+      async fetchDocumentContent(_context, args) {
+        return {
+          found: true,
+          documentId: args.documentId,
+          documentType: 'issue',
+          title: 'Issue title',
+          contentText: 'persisted content that is stale',
+        };
+      },
+    });
+
+    const result = await runFleetGraphChat(makeRequest({
+      question: 'what is the code?',
+      pageContext: {
+        route: '/documents/iss-1/details',
+        surface: 'issue',
+        documentId: 'iss-1',
+        title: 'Issue title',
+        visibleContentText: 'code is 123',
+      },
+    }), {
+      client,
+      data,
+      model: 'gpt-5.3-chat-latest',
+      maxSteps: 3,
+    });
+
+    expect(result.assessment.summary).toBe('The code is 123.');
+    expect(result.toolCalls).toEqual([]);
+    expect(client.calls).toEqual([]);
   });
 
   it('stops after the configured max step count', async () => {

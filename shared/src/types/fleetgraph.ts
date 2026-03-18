@@ -374,6 +374,7 @@ export interface FleetGraphPageContext {
   surface: 'docs' | 'issue' | 'project' | 'sprint' | 'workspace';
   documentId?: string;
   title?: string;
+  visibleContentText?: string;
   tab?: string;
   tabLabel?: string;
   documentType?: string;

@@ -11,13 +11,15 @@ export type FleetGraphChatToolName =
   | 'fetch_project_context'
   | 'fetch_workspace_signals'
   | 'fetch_entity_drift'
-  | 'fetch_related_documents';
+  | 'fetch_related_documents'
+  | 'fetch_document_content';
 
 export interface FleetGraphChatHintContext {
   route: string;
   surface: FleetGraphPageContext['surface'];
   documentId?: string;
   title?: string;
+  visibleContentText?: string;
   tab?: string;
   tabLabel?: string;
 }
@@ -156,6 +158,10 @@ export interface FleetGraphChatDataAccess {
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
   fetchRelatedDocuments(
+    context: FleetGraphChatToolContext,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  fetchDocumentContent(
     context: FleetGraphChatToolContext,
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;

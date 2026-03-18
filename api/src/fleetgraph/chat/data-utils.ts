@@ -119,6 +119,10 @@ export function summarizeManagerItems(items: ManagerActionItem[], limit = 5) {
   }));
 }
 
+export function summarizeDocumentContent(content: unknown, max = 600) {
+  return compactText(extractText(content) as string | null | undefined, max);
+}
+
 export function summarizeSprintContext(context: Record<string, unknown>) {
   const sprint = context.sprint as Record<string, unknown> | undefined;
   const project = context.project as Record<string, unknown> | undefined;
@@ -205,7 +209,7 @@ export function detectIssueDrift(issue: IssueRow, history: IssueHistoryRow[]) {
 export function detectProjectDrift(project: ProjectRow) {
   const properties = asRecord(project.properties);
   const title = compactText(project.title, 120);
-  const contentText = compactText(extractText(project.content) as string | null | undefined, 300);
+  const contentText = summarizeDocumentContent(project.content, 300);
   const plan = compactText(properties.plan, 300);
 
   return {
@@ -227,6 +231,7 @@ export function normalizeChatPageContext(pageContext: FleetGraphChatHintContext 
     surface: pageContext.surface,
     documentId: pageContext.documentId,
     title: compactText(pageContext.title, 120) ?? undefined,
+    visibleContentText: compactText(pageContext.visibleContentText, 2000) ?? undefined,
     tab: pageContext.tab,
     tabLabel: compactText(pageContext.tabLabel, 80) ?? undefined,
   };

@@ -21,12 +21,13 @@ import {
   resolveToolInput,
 } from './tools.js';
 import type {
+  FleetGraphChatDataAccess,
   FleetGraphChatRequest,
   FleetGraphChatRuntimeAssessment,
   FleetGraphChatRuntimeDependencies,
   FleetGraphChatRuntimeResult,
-  FleetGraphChatToolCallRecord,
   FleetGraphChatToolContext,
+  FleetGraphChatToolCallRecord,
   FleetGraphChatToolName,
   FleetGraphResponsesClientLike,
   FleetGraphResponsesFunctionCall,
@@ -182,6 +183,118 @@ function buildImmediateResult(assessment: FleetGraphChatRuntimeAssessment): Flee
   };
 }
 
+function isCurrentPageContentQuestion(request: FleetGraphChatRequest): boolean {
+  if (!request.pageContext?.documentId) {
+    return false;
+  }
+
+  const normalized = request.question.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /\bwhat(?:'s| is)\b/.test(normalized)
+    || /\b(show|tell|give|extract)\b/.test(normalized)
+  ) && (
+    /\bcode\b/.test(normalized)
+    || /\b(content|text)\b/.test(normalized)
+    || /\bthis page\b/.test(normalized)
+    || /\bdocument\b/.test(normalized)
+    || /\b(ticket|issue)\b.*\b(say|says|written)\b/.test(normalized)
+  );
+}
+
+function buildCurrentPageContentAssessment(contentText: string): FleetGraphChatRuntimeAssessment {
+  const exactCodeMatch = contentText.match(/\bcode\s+is\s+([A-Za-z0-9_-]+)\b/i);
+  if (exactCodeMatch?.[1]) {
+    return {
+      summary: `The code is ${exactCodeMatch[1]}.`,
+      recommendation: `Use ${exactCodeMatch[1]}.`,
+      branch: 'inform_only',
+      proposedAction: null,
+      citations: ['document-content'],
+    };
+  }
+
+  return {
+    summary: `The current page says: ${contentText}`,
+    recommendation: 'Ask for a shorter excerpt if you need a specific part.',
+    branch: 'inform_only',
+    proposedAction: null,
+    citations: ['document-content'],
+  };
+}
+
+async function resolveCurrentPageContentQuestion(
+  request: FleetGraphChatRequest,
+  data: FleetGraphChatDataAccess,
+): Promise<FleetGraphChatRuntimeResult | null> {
+  if (!isCurrentPageContentQuestion(request)) {
+    return null;
+  }
+
+  const pageContext = normalizeChatPageContext(request.pageContext ?? null);
+  const context: FleetGraphChatToolContext = {
+    workspaceId: request.workspaceId,
+    userId: request.userId,
+    threadId: request.threadId,
+    entityType: request.entityType,
+    entityId: request.entityId,
+    pageContext,
+  };
+
+  const visibleContentText = typeof pageContext?.visibleContentText === 'string'
+    ? pageContext.visibleContentText.trim()
+    : '';
+  if (visibleContentText) {
+    const assessment = buildCurrentPageContentAssessment(visibleContentText);
+    const message = buildMessage(assessment);
+    return {
+      responseId: null,
+      traceUrl: null,
+      steps: 0,
+      assessment,
+      message,
+      toolCalls: [],
+      rawOutputText: message.content,
+      usage: null,
+    };
+  }
+
+  const documentId = pageContext?.documentId ?? request.entityId;
+  const output = await data.fetchDocumentContent(context, { documentId });
+  const contentText = typeof output.contentText === 'string' ? output.contentText.trim() : '';
+
+  if (!contentText) {
+    return buildImmediateResult({
+      summary: 'I could not find document body text on this page.',
+      recommendation: 'Refresh the page content or ask about a specific document section.',
+      branch: 'inform_only',
+      proposedAction: null,
+      citations: [],
+    });
+  }
+
+  const assessment = buildCurrentPageContentAssessment(contentText);
+  const message = buildMessage(assessment);
+  return {
+    responseId: null,
+    traceUrl: null,
+    steps: 0,
+    assessment,
+    message,
+    toolCalls: [{
+      name: 'fetch_document_content',
+      callId: 'direct-page-content',
+      arguments: { documentId },
+      result: output,
+    }],
+    rawOutputText: message.content,
+    usage: null,
+  };
+}
+
 function classifyBlockedQuestion(question: string): FleetGraphChatRuntimeAssessment | null {
   const normalized = question.trim().toLowerCase();
   if (!normalized) {
@@ -237,6 +350,10 @@ async function runFleetGraphChatInternal(
 
   const client = deps.client ?? createDefaultClient();
   const data = deps.data ?? createFleetGraphChatDataAccess();
+  const directCurrentPageAnswer = await resolveCurrentPageContentQuestion(request, data);
+  if (directCurrentPageAnswer) {
+    return directCurrentPageAnswer;
+  }
   const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const toolSchemas = getFleetGraphChatToolSchemas();

@@ -153,4 +153,48 @@ describe('createFleetGraphChatDataAccess', () => {
     expect(mockLegacyFetchActiveSprints).not.toHaveBeenCalled();
     expect(mockLegacyFetchAllSprints).not.toHaveBeenCalled();
   });
+
+  it('loads current document body text from the active page document', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{
+        id: 'iss-1',
+        title: 'Create admin dashboard',
+        document_type: 'issue',
+        content: {
+          type: 'doc',
+          content: [{
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'code is 123' }],
+          }],
+        },
+        yjs_state: null,
+      }],
+    });
+
+    const data = createFleetGraphChatDataAccess();
+    const result = await data.fetchDocumentContent(
+      {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'issue',
+        entityId: 'iss-1',
+        pageContext: {
+          route: '/documents/iss-1',
+          surface: 'issue',
+          documentId: 'iss-1',
+          title: 'Create admin dashboard',
+        },
+      },
+      {},
+    );
+
+    expect(result).toEqual({
+      found: true,
+      documentId: 'iss-1',
+      documentType: 'issue',
+      title: 'Create admin dashboard',
+      contentText: 'code is 123',
+    });
+  });
 });
