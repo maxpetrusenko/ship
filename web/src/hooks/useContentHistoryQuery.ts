@@ -1,10 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/lib/api';
 
+type JsonPrimitive = string | number | boolean | null;
+
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+type JsonArray = JsonValue[];
+
+type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
 export interface ContentHistoryEntry {
   id: number;
-  old_content: any | null;
-  new_content: any | null;
+  old_content: JsonValue | null;
+  new_content: JsonValue | null;
   created_at: string;
   changed_by: {
     id: string;

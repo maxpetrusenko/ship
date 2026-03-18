@@ -6,6 +6,7 @@ const mockUseCurrentDocument = vi.fn();
 const mockUseWorkspace = vi.fn();
 const mockUseIssues = vi.fn();
 const mockUseProjects = vi.fn();
+const mockUseActiveWeeksQuery = vi.fn();
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -31,6 +32,10 @@ vi.mock('@/contexts/ProjectsContext', () => ({
   useProjects: () => mockUseProjects(),
 }));
 
+vi.mock('@/hooks/useWeeksQuery', () => ({
+  useActiveWeeksQuery: () => mockUseActiveWeeksQuery(),
+}));
+
 import { parseScopeFromPath, useFleetGraphScope } from './useFleetGraphScope';
 
 beforeEach(() => {
@@ -47,6 +52,7 @@ beforeEach(() => {
   });
   mockUseIssues.mockReturnValue({ issues: [] });
   mockUseProjects.mockReturnValue({ projects: [] });
+  mockUseActiveWeeksQuery.mockReturnValue({ data: null });
 });
 
 describe('parseScopeFromPath', () => {
@@ -111,6 +117,21 @@ describe('useFleetGraphScope', () => {
       scopeType: 'workspace',
       scopeId: 'ws-1',
       scopeLabel: 'Acme Workspace',
+    });
+  });
+
+  it('infers issue scope from a unified document route when issue data is already loaded', () => {
+    mockUseLocation.mockReturnValue({ pathname: '/documents/issue-42/details' });
+    mockUseIssues.mockReturnValue({
+      issues: [{ id: 'issue-42', title: 'Fix trace propagation' }],
+    });
+
+    const { result } = renderHook(() => useFleetGraphScope());
+
+    expect(result.current).toEqual({
+      scopeType: 'issue',
+      scopeId: 'issue-42',
+      scopeLabel: 'Fix trace propagation',
     });
   });
 });

@@ -3,6 +3,14 @@ import type pg from 'pg';
 import type { ShipIssueSummary, ShipSprint } from '../data/types.js';
 import { FleetGraphScheduler } from './scheduler.js';
 import { computeFleetGraphEntityDigest } from './digest.js';
+import type { FleetGraphQueue, FleetGraphQueueItem } from './queue.js';
+import type { fetchActiveSprints, fetchIssues } from '../data/fetchers.js';
+import type {
+  cleanExpiredSnoozed,
+  expirePendingApprovals,
+  getEntityDigest,
+  setEntityDigest,
+} from './persistence.js';
 
 const mockFetchActiveSprints = vi.fn();
 const mockFetchIssues = vi.fn();
@@ -12,15 +20,20 @@ const mockGetEntityDigest = vi.fn();
 const mockSetEntityDigest = vi.fn();
 
 vi.mock('../data/fetchers.js', () => ({
-  fetchActiveSprints: (...args: unknown[]) => mockFetchActiveSprints(...args),
-  fetchIssues: (...args: unknown[]) => mockFetchIssues(...args),
+  fetchActiveSprints: (...args: Parameters<typeof fetchActiveSprints>) =>
+    mockFetchActiveSprints(...args),
+  fetchIssues: (...args: Parameters<typeof fetchIssues>) => mockFetchIssues(...args),
 }));
 
 vi.mock('./persistence.js', () => ({
-  cleanExpiredSnoozed: (...args: unknown[]) => mockCleanExpiredSnoozed(...args),
-  expirePendingApprovals: (...args: unknown[]) => mockExpirePendingApprovals(...args),
-  getEntityDigest: (...args: unknown[]) => mockGetEntityDigest(...args),
-  setEntityDigest: (...args: unknown[]) => mockSetEntityDigest(...args),
+  cleanExpiredSnoozed: (...args: Parameters<typeof cleanExpiredSnoozed>) =>
+    mockCleanExpiredSnoozed(...args),
+  expirePendingApprovals: (...args: Parameters<typeof expirePendingApprovals>) =>
+    mockExpirePendingApprovals(...args),
+  getEntityDigest: (...args: Parameters<typeof getEntityDigest>) =>
+    mockGetEntityDigest(...args),
+  setEntityDigest: (...args: Parameters<typeof setEntityDigest>) =>
+    mockSetEntityDigest(...args),
 }));
 
 function makeSprint(overrides: Partial<ShipSprint> = {}): ShipSprint {
@@ -55,8 +68,18 @@ function makeIssue(overrides: Partial<ShipIssueSummary> = {}): ShipIssueSummary 
   };
 }
 
+interface SchedulerTestHarness {
+  sweep(): Promise<void>;
+  processQueue(): Promise<void>;
+  queue: FleetGraphQueue;
+}
+
+interface QueueTestHarness {
+  pending: Map<string, FleetGraphQueueItem>;
+}
+
 describe('FleetGraphScheduler Phase 3A', () => {
-  const pool = { query: vi.fn() } as unknown as pg.Pool;
+  const pool = { query: vi.fn() } as Partial<pg.Pool> as pg.Pool;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -78,14 +101,15 @@ describe('FleetGraphScheduler Phase 3A', () => {
       { invoke: vi.fn().mockResolvedValue({}) as never },
       vi.fn(),
     );
+    const internals = scheduler as FleetGraphScheduler & SchedulerTestHarness;
 
     const digest = computeFleetGraphEntityDigest('sprint', sprint);
     mockGetEntityDigest.mockResolvedValue(digest);
 
-    await (scheduler as any).sweep();
+    await internals.sweep();
 
     expect(mockGetEntityDigest).toHaveBeenCalledWith(pool, 'ws-1', 'sprint', 'sprint-1');
-    expect((scheduler as any).queue.size).toBe(0);
+    expect(internals.queue.size).toBe(0);
   });
 
   it('persists digest after a successful proactive run', async () => {
@@ -95,8 +119,9 @@ describe('FleetGraphScheduler Phase 3A', () => {
     mockFetchIssues.mockResolvedValue([issue]);
     const invoke = vi.fn().mockResolvedValue({});
     const scheduler = new FleetGraphScheduler(pool, { invoke }, vi.fn());
+    const internals = scheduler as FleetGraphScheduler & SchedulerTestHarness;
 
-    await (scheduler as any).sweep();
+    await internals.sweep();
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(mockSetEntityDigest).toHaveBeenCalledWith(
@@ -123,8 +148,9 @@ describe('FleetGraphScheduler Phase 3A', () => {
     mockFetchIssues.mockResolvedValue([issueOne, issueTwo]);
     const invoke = vi.fn().mockResolvedValue({});
     const scheduler = new FleetGraphScheduler(pool, { invoke }, vi.fn());
+    const internals = scheduler as FleetGraphScheduler & SchedulerTestHarness;
 
-    await (scheduler as any).sweep();
+    await internals.sweep();
 
     expect(mockFetchIssues).toHaveBeenCalledWith(expect.anything(), { sprint_id: 'sprint-2' });
     expect(invoke).toHaveBeenCalledTimes(3);
@@ -150,8 +176,9 @@ describe('FleetGraphScheduler Phase 3A', () => {
     mockFetchIssues.mockResolvedValue([doneIssue, activeIssue]);
     const invoke = vi.fn().mockResolvedValue({});
     const scheduler = new FleetGraphScheduler(pool, { invoke }, vi.fn());
+    const internals = scheduler as FleetGraphScheduler & SchedulerTestHarness;
 
-    await (scheduler as any).sweep();
+    await internals.sweep();
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(invoke).toHaveBeenNthCalledWith(
@@ -175,18 +202,20 @@ describe('FleetGraphScheduler Phase 3A', () => {
       .mockRejectedValueOnce(new Error('upstream 429'))
       .mockResolvedValueOnce({});
     const scheduler = new FleetGraphScheduler(pool, { invoke }, vi.fn());
+    const internals = scheduler as FleetGraphScheduler & SchedulerTestHarness;
+    const queueInternals = internals.queue as FleetGraphQueue & QueueTestHarness;
 
-    await (scheduler as any).sweep();
+    await internals.sweep();
 
     expect(invoke).toHaveBeenCalledTimes(1);
-    expect((scheduler as any).queue.size).toBe(1);
+    expect(internals.queue.size).toBe(1);
 
-    const queued = Array.from((scheduler as any).queue.pending.values())[0];
+    const queued = Array.from(queueInternals.pending.values())[0];
     expect(queued?.attempt).toBe(1);
     expect(queued?.availableAt).toBeGreaterThan(Date.now());
 
-    (scheduler as any).queue.clear();
-    (scheduler as any).queue.enqueue({
+    internals.queue.clear();
+    internals.queue.enqueue({
       workspaceId: queued!.workspaceId,
       mode: queued!.mode,
       entityType: queued!.entityType,
@@ -196,7 +225,7 @@ describe('FleetGraphScheduler Phase 3A', () => {
       digest: queued!.digest,
     });
 
-    await (scheduler as any).processQueue();
+    await internals.processQueue();
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(mockSetEntityDigest).toHaveBeenCalledTimes(1);

@@ -29,4 +29,12 @@ printf '%s' "$LOGIN_JSON" | node -e "let body='';process.stdin.on('data',d=>body
 echo "4. App shell"
 curl -fsSI "$BASE_URL" >/dev/null
 
+echo "5. FleetGraph status"
+STATUS_JSON="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/fleetgraph/status")"
+printf '%s' "$STATUS_JSON" | node -e "let body='';process.stdin.on('data',d=>body+=d);process.stdin.on('end',()=>{const data=JSON.parse(body);if(typeof data.running !== 'boolean'){process.exit(1)};console.log('fleetgraph status ok:', data.running ? 'running' : 'stopped')})"
+
+echo "6. FleetGraph chat thread"
+THREAD_JSON="$(curl -fsS -b "$COOKIE_JAR" "$BASE_URL/api/fleetgraph/chat/thread")"
+printf '%s' "$THREAD_JSON" | node -e "let body='';process.stdin.on('data',d=>body+=d);process.stdin.on('end',()=>{const data=JSON.parse(body);if(!Object.prototype.hasOwnProperty.call(data,'thread') || !Array.isArray(data.messages)){process.exit(1)};console.log('fleetgraph thread ok:', data.thread ? 'active' : 'none')})"
+
 echo "Smoke passed"

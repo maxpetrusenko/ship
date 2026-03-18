@@ -3,7 +3,7 @@
  * Enumerates active sprints, enqueues proactive runs, processes queue.
  */
 import type pg from 'pg';
-import type { FleetGraphRunState } from '@ship/shared';
+import type { FleetGraphAlertEvent, FleetGraphRunState } from '@ship/shared';
 import { FleetGraphQueue } from './queue.js';
 import {
   cleanExpiredSnoozed,
@@ -22,7 +22,19 @@ const RUN_RETRY_BASE_MS = 1_000;
 const RUN_RETRY_MAX_MS = 30_000;
 const RUN_RETRY_LIMIT = 2;
 
-export type BroadcastFn = (userId: string, eventType: string, data?: Record<string, unknown>) => void;
+type FleetGraphBroadcastValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FleetGraphBroadcastValue[]
+  | { [key: string]: FleetGraphBroadcastValue };
+
+export type BroadcastFn = (
+  userId: string,
+  eventType: string,
+  data?: FleetGraphAlertEvent | Record<string, FleetGraphBroadcastValue>,
+) => void;
 
 type ActiveSprint = {
   workspaceId: string;
@@ -283,6 +295,7 @@ export class FleetGraphScheduler {
           actorUserId: null,
           entityType: item.entityType,
           entityId: item.entityId,
+          pageContext: null,
           coreContext: {},
           parallelSignals: {},
           candidates: [],

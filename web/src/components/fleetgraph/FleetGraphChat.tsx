@@ -8,6 +8,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { cn } from '@/lib/cn';
 import {
   useFleetGraphChat,
+  useFleetGraphAlerts,
   useFleetGraphThread,
   useFleetGraphCreateThread,
   useFleetGraphResolve,
@@ -26,14 +27,16 @@ interface FleetGraphChatProps {
   entityType: FleetGraphEntityType;
   entityId: string;
   workspaceId: string;
-  /** Optional scope label shown in chat header. */
-  scopeLabel?: string;
+  /** External header trigger for creating a new thread. */
+  newThreadNonce?: number;
   /** Scope type for workspace-level analysis. */
   scopeType?: FleetGraphScopeType;
   /** Page context injected into every chat turn. */
   pageContext?: FleetGraphPageContext;
   /** Called when a new thread is created (so parent can react). */
   onNewThread?: () => void;
+  /** Keep one workspace thread even as visible entity scope changes. */
+  persistAcrossScopes?: boolean;
 }
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -63,6 +66,8 @@ const QUICK_PROMPTS: Record<string, string[]> = {
   ],
 };
 
+const LOG_PREFIX = '[FleetGraph:Chat]';
+
 interface AssessmentResultProps {
   assessment: FleetGraphAssessment;
   /** Callback to execute an action (approve/dismiss) on the proposed action's alert. */
@@ -80,7 +85,7 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
     ? 'text-accent bg-accent/10'
     : 'text-muted bg-border/30';
 
-  const isActionable = assessment.branch === 'confirm_action' && assessment.proposedAction && alertId && onAction;
+  const isActionable = !!assessment.proposedAction && !!alertId && !!onAction;
 
   const handleAction = async (outcome: 'approve' | 'dismiss') => {
     if (!onAction || !alertId) return;
@@ -92,6 +97,39 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
       setActionState('idle');
     }
   };
+
+  if (assessment.branch === 'inform_only' && !assessment.proposedAction) {
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-foreground leading-relaxed">{assessment.summary}</p>
+        {assessment.citations.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {assessment.citations.map((cite, i) => {
+              const isUrl = cite.startsWith('http://') || cite.startsWith('https://');
+              if (isUrl) {
+                return (
+                  <a
+                    key={i}
+                    href={cite}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-accent bg-accent/10 px-1.5 py-0.5 rounded hover:bg-accent/20 transition-colors"
+                  >
+                    Source {i + 1}
+                  </a>
+                );
+              }
+              return (
+                <span key={i} className="text-[10px] text-muted bg-border/30 px-1.5 py-0.5 rounded">
+                  {cite}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded border border-border bg-border/10 p-2.5 space-y-2">
@@ -121,22 +159,32 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
       {isActionable && actionState === 'idle' && (
         <div className="flex items-center gap-1.5 pt-0.5">
           <button
+            type="button"
             onClick={() => handleAction('approve')}
+            aria-label="Approve"
+            title="Approve"
             className={cn(
-              'text-[11px] px-2.5 py-1 rounded font-medium transition-colors',
-              'bg-accent text-white hover:bg-accent/90',
+              'inline-flex h-6 w-6 items-center justify-center rounded font-medium transition-colors',
+              'bg-green-500/15 text-green-400 hover:bg-green-500/25',
             )}
           >
-            Approve
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 8.25 6.5 11 12.5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
           <button
+            type="button"
             onClick={() => handleAction('dismiss')}
+            aria-label="Dismiss"
+            title="Dismiss"
             className={cn(
-              'text-[11px] px-2 py-1 rounded transition-colors',
-              'bg-border/40 text-muted hover:text-foreground hover:bg-border/60',
+              'inline-flex h-6 w-6 items-center justify-center rounded transition-colors',
+              'bg-red-500/15 text-red-400 hover:bg-red-500/25',
             )}
           >
-            Dismiss
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 4 12 12M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
       )}
@@ -149,7 +197,7 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
         </div>
       )}
       {/* Suggestion-only label when no linked alert */}
-      {assessment.branch === 'confirm_action' && assessment.proposedAction && !alertId && (
+      {assessment.proposedAction && !alertId && (
         <div className="text-[10px] text-muted italic py-0.5">
           Suggested only (no linked alert)
         </div>
@@ -203,15 +251,22 @@ function DebugPopover({ debug }: { debug: FleetGraphChatDebugInfo }) {
           className="z-[10000] w-72 rounded-md border border-border bg-background p-3 shadow-lg space-y-2"
         >
           <div className="space-y-1">
-            <div className="text-[10px] font-medium text-muted uppercase tracking-wider">Trace</div>
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted uppercase tracking-wider">
+              <TraceArrowsIcon className="w-3 h-3" />
+              <span>Trace</span>
+            </div>
             {debug.traceUrl ? (
               <a
                 href={debug.traceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-accent break-all"
+                className="inline-flex items-center gap-1 text-xs text-accent"
               >
-                {debug.traceUrl}
+                <TraceArrowsIcon className="w-3 h-3 flex-shrink-0" />
+                <span>Open trace</span>
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 17L17 7M9 7h8v8" />
+                </svg>
               </a>
             ) : (
               <div className="text-xs text-muted">Unavailable</div>
@@ -255,9 +310,33 @@ function DebugPopover({ debug }: { debug: FleetGraphChatDebugInfo }) {
             <div className="text-[10px] font-medium text-muted uppercase tracking-wider">Manager Items</div>
             <div className="text-xs text-foreground">{debug.managerActionItems}</div>
           </div>
+
+          {debug.toolCalls && debug.toolCalls.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-medium text-muted uppercase tracking-wider">Tools</div>
+              <div className="space-y-1">
+                {debug.toolCalls.map((toolCall, index) => (
+                  <div key={`${toolCall.name}-${index}`} className="rounded border border-border bg-background/50 p-2">
+                    <div className="text-xs text-foreground">{toolCall.name}</div>
+                    <div className="text-[10px] text-muted break-words">
+                      {JSON.stringify(toolCall.arguments)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+function TraceArrowsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" />
+    </svg>
   );
 }
 
@@ -271,6 +350,7 @@ function ChatBubble({ message, onAction, alertId }: ChatBubbleProps) {
   const isUser = message.role === 'user';
   const contentMatchesAssessmentSummary = !!message.assessment
     && message.content.trim() === message.assessment.summary.trim();
+  const traceUrl = !isUser ? message.debug?.traceUrl ?? null : null;
 
   return (
     <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
@@ -290,9 +370,19 @@ function ChatBubble({ message, onAction, alertId }: ChatBubbleProps) {
             alertId={alertId}
           />
         )}
-        {!isUser && message.debug && (
-          <div className="flex justify-end">
-            <DebugPopover debug={message.debug} />
+        {!isUser && (message.debug || traceUrl) && (
+          <div className="flex items-center justify-end gap-2">
+            {traceUrl && (
+              <a
+                href={traceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-accent hover:underline"
+              >
+                Trace
+              </a>
+            )}
+            {message.debug && <DebugPopover debug={message.debug} />}
           </div>
         )}
       </div>
@@ -300,32 +390,71 @@ function ChatBubble({ message, onAction, alertId }: ChatBubbleProps) {
   );
 }
 
+function resolveMessageAlertId(
+  message: FleetGraphChatMessage,
+  activeAlerts: Array<{ id: string; summary: string; signalType: string; status: string }>,
+): string | undefined {
+  if (message.alertId) {
+    return message.alertId;
+  }
+
+  if (!message.assessment?.proposedAction) {
+    return undefined;
+  }
+
+  const matchingAlerts = activeAlerts.filter((alert) =>
+    alert.status === 'active'
+    && alert.signalType === 'chat_suggestion'
+    && alert.summary === message.assessment?.summary,
+  );
+
+  if (matchingAlerts.length === 1) {
+    return matchingAlerts[0]?.id;
+  }
+
+  return undefined;
+}
+
 export function FleetGraphChat({
   entityType,
   entityId,
   workspaceId,
-  scopeLabel,
+  newThreadNonce = 0,
   scopeType,
   pageContext,
   onNewThread,
+  persistAcrossScopes = false,
 }: FleetGraphChatProps) {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<FleetGraphChatMessage[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [latestAlertId, setLatestAlertId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastHandledNewThreadNonceRef = useRef(newThreadNonce);
   const chat = useFleetGraphChat();
-  const threadQuery = useFleetGraphThread();
-  const createThread = useFleetGraphCreateThread();
+  const alertsQuery = useFleetGraphAlerts(entityType, entityId);
+  const threadEntityType = persistAcrossScopes ? undefined : entityType;
+  const threadEntityId = persistAcrossScopes ? undefined : entityId;
+  const threadQuery = useFleetGraphThread(threadEntityType, threadEntityId);
+  const createThread = useFleetGraphCreateThread(threadEntityType, threadEntityId);
   const resolve = useFleetGraphResolve();
 
   // Fence: track the entity that was active when mutation started
   const entityFenceRef = useRef({ entityType, entityId });
   const entityKey = useMemo(() => `${entityType}:${entityId}`, [entityType, entityId]);
+  const threadKey = useMemo(
+    () => (persistAcrossScopes ? `workspace:${workspaceId}` : `${threadEntityType}:${threadEntityId}`),
+    [persistAcrossScopes, workspaceId, threadEntityType, threadEntityId],
+  );
   useEffect(() => {
     entityFenceRef.current = { entityType, entityId };
   }, [entityType, entityId]);
+
+  useEffect(() => {
+    hydrated.current = false;
+    setMessages([]);
+    setThreadId(null);
+  }, [threadKey]);
 
   const effectiveScopeType = scopeType ?? entityType;
   const entityLabel = ENTITY_LABELS[effectiveScopeType] ?? effectiveScopeType;
@@ -336,16 +465,25 @@ export function FleetGraphChat({
   useEffect(() => {
     if (hydrated.current) return;
     if (!threadQuery.data) return;
+    if (messages.length > 0) {
+      hydrated.current = true;
+      return;
+    }
 
     const { thread, messages: dbMessages } = threadQuery.data;
     if (thread) {
       setThreadId(thread.id);
       if (dbMessages.length > 0) {
         setMessages(dbMessages);
+        console.log(`${LOG_PREFIX} hydrated messages`, {
+          threadId: thread.id,
+          count: dbMessages.length,
+          messages: dbMessages,
+        });
       }
     }
     hydrated.current = true;
-  }, [threadQuery.data]);
+  }, [messages.length, threadQuery.data]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -354,24 +492,24 @@ export function FleetGraphChat({
     }
   }, [messages]);
 
-  // Reset conversation when entity changes
-  useEffect(() => {
-    setMessages([]);
-    // Keep threadId — the thread persists across entity switches.
-    // The server stores pageContext per turn so it knows the current entity.
-  }, [entityType, entityId]);
-
   const handleNewThread = useCallback(async () => {
     try {
       const result = await createThread.mutateAsync();
       setThreadId(result.thread.id);
       setMessages([]);
       hydrated.current = true; // prevent re-hydration from stale query
+      console.log(`${LOG_PREFIX} new thread`, { threadId: result.thread.id });
       onNewThread?.();
     } catch {
       // Ignore — thread creation is non-critical
     }
   }, [createThread, onNewThread]);
+
+  useEffect(() => {
+    if (newThreadNonce <= lastHandledNewThreadNonceRef.current) return;
+    lastHandledNewThreadNonceRef.current = newThreadNonce;
+    handleNewThread();
+  }, [handleNewThread, newThreadNonce]);
 
   const handleResolveAction = useCallback(async (outcome: 'approve' | 'dismiss', alertId: string) => {
     await resolve.mutateAsync({ alertId, outcome });
@@ -395,6 +533,7 @@ export function FleetGraphChat({
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
+    console.log(`${LOG_PREFIX} user message`, userMsg);
     setQuestion('');
 
     try {
@@ -415,13 +554,9 @@ export function FleetGraphChat({
         setThreadId(result.threadId);
       }
 
-      // Track latest alert ID for actionable controls
-      if (result.alerts?.length > 0) {
-        setLatestAlertId(result.alerts[0].id);
-      }
-
       if (result.message) {
         setMessages((prev) => [...prev, result.message]);
+        console.log(`${LOG_PREFIX} assistant message`, result.message);
       }
     } catch {
       const currentKey = `${entityFenceRef.current.entityType}:${entityFenceRef.current.entityId}`;
@@ -450,33 +585,16 @@ export function FleetGraphChat({
     [handleSubmit],
   );
 
+  const activeAlerts = useMemo(
+    () => (alertsQuery.data?.alerts ?? []).filter((alert) => alert.status === 'active'),
+    [alertsQuery.data],
+  );
+
   return (
     <div className="space-y-2">
-      {/* Scope label badge (when provided) */}
-      {scopeLabel && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-muted uppercase tracking-wider font-medium">Scope</span>
-          <span className="text-[10px] text-foreground bg-border/40 px-1.5 py-0.5 rounded truncate max-w-[200px]">
-            {scopeLabel}
-          </span>
-        </div>
-      )}
-
       {/* Conversation history */}
       {messages.length > 0 && (
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted uppercase tracking-wider font-medium">
-              Conversation ({messages.length})
-            </span>
-            <button
-              onClick={handleNewThread}
-              disabled={createThread.isPending}
-              className="text-[10px] text-muted hover:text-foreground transition-colors disabled:opacity-40"
-            >
-              New Thread
-            </button>
-          </div>
           <div
             ref={scrollRef}
             className="max-h-[240px] overflow-y-auto space-y-1.5 pr-0.5"
@@ -486,7 +604,7 @@ export function FleetGraphChat({
                 key={i}
                 message={msg}
                 onAction={handleResolveAction}
-                alertId={latestAlertId ?? undefined}
+                alertId={resolveMessageAlertId(msg, activeAlerts)}
               />
             ))}
           </div>
@@ -509,6 +627,7 @@ export function FleetGraphChat({
         <div className="flex flex-wrap gap-1">
           {quickPrompts.map((prompt) => (
             <button
+              type="button"
               key={prompt}
               onClick={() => runAnalysis(prompt)}
               className="text-[10px] px-2 py-1 rounded border border-border text-muted hover:text-foreground hover:bg-border/30 transition-colors"
@@ -538,6 +657,7 @@ export function FleetGraphChat({
           )}
         />
         <button
+          type="button"
           onClick={handleSubmit}
           disabled={!question.trim() || chat.isPending}
           className={cn(

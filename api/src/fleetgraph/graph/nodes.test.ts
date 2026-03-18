@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeterministicChatAssessment, heuristicFilter } from './nodes.js';
+import { buildDeterministicChatAssessment, heuristicFilter, REASONING_SYSTEM_PROMPT } from './nodes.js';
 import type { FleetGraphRunState, FleetGraphCandidate } from '@ship/shared';
 
 function makeState(overrides: Partial<FleetGraphRunState> = {}): FleetGraphRunState {
@@ -11,6 +11,7 @@ function makeState(overrides: Partial<FleetGraphRunState> = {}): FleetGraphRunSt
     actorUserId: 'user-1',
     entityType: 'issue',
     entityId: 'issue-1',
+    pageContext: null,
     coreContext: {},
     parallelSignals: {},
     candidates: [],
@@ -151,6 +152,104 @@ describe('heuristicFilter', () => {
     });
   });
 
+  it('creates a scope drift candidate for project content that is off-topic', async () => {
+    const result = await heuristicFilter(
+      makeState({
+        entityType: 'project',
+        entityId: 'project-drift',
+        coreContext: {
+          entity: {
+            title: 'Infrastructure Bug Fixes',
+            document_type: 'project',
+            properties: {
+              plan: 'Stabilize auth pipeline and fix flaky deployment bugs',
+            },
+            content: {
+              type: 'doc',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'lets build the plane and fly to the moon' },
+                  ],
+                },
+              ],
+            },
+          },
+          relatedEntities: [
+            { title: 'Fix auth pipeline flakes' },
+            { title: 'Repair deployment rollback bug' },
+          ],
+        },
+        parallelSignals: {
+          lastActivityDays: 0,
+          missingStandup: false,
+          pendingApprovalDays: 0,
+          scopeDrift: false,
+          managerActionItems: [],
+        },
+      }),
+    );
+
+    const driftCandidates = result.candidates!.filter(
+      (c: FleetGraphCandidate) => c.signalType === 'scope_drift',
+    );
+    expect(driftCandidates).toHaveLength(1);
+    expect(driftCandidates[0]).toMatchObject({
+      entityType: 'project',
+      entityId: 'project-drift',
+      severity: 'high',
+      evidence: expect.objectContaining({
+        reason: 'project_content_topic_mismatch',
+      }),
+    });
+  });
+
+  it('keeps project content clean when it matches project topic', async () => {
+    const result = await heuristicFilter(
+      makeState({
+        entityType: 'project',
+        entityId: 'project-clean',
+        coreContext: {
+          entity: {
+            title: 'Infrastructure Bug Fixes',
+            document_type: 'project',
+            properties: {
+              plan: 'Stabilize auth pipeline and fix flaky deployment bugs',
+            },
+            content: {
+              type: 'doc',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'Fix auth pipeline bugs and deployment rollback handling this week.' },
+                  ],
+                },
+              ],
+            },
+          },
+          relatedEntities: [
+            { title: 'Fix auth pipeline flakes' },
+            { title: 'Repair deployment rollback bug' },
+          ],
+        },
+        parallelSignals: {
+          lastActivityDays: 0,
+          missingStandup: false,
+          pendingApprovalDays: 0,
+          scopeDrift: false,
+          managerActionItems: [],
+        },
+      }),
+    );
+
+    const driftCandidates = result.candidates!.filter(
+      (c: FleetGraphCandidate) => c.signalType === 'scope_drift',
+    );
+    expect(driftCandidates).toHaveLength(0);
+  });
+
   describe('manager_missing_standup signal', () => {
     it('no missed standups: clean branch', async () => {
       const result = await heuristicFilter(
@@ -288,6 +387,15 @@ describe('heuristicFilter', () => {
       expect(mgrCandidates).toHaveLength(1);
       expect(mgrCandidates[0].severity).toBe('high');
     });
+  });
+});
+
+describe('REASONING_SYSTEM_PROMPT', () => {
+  it('keeps FleetGraph chat Ship-only, short, and scope-bound', () => {
+    expect(REASONING_SYSTEM_PROMPT).toContain('If userQuestion is unrelated to Ship');
+    expect(REASONING_SYSTEM_PROMPT).toContain('Keep chat answers short');
+    expect(REASONING_SYSTEM_PROMPT).toContain('Stay inside the provided Ship scope');
+    expect(REASONING_SYSTEM_PROMPT).not.toContain('answer it briefly and naturally');
   });
 });
 

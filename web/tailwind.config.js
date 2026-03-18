@@ -23,6 +23,15 @@ export default {
           'sans-serif',
         ],
       },
+      keyframes: {
+        'fg-pulse': {
+          '0%, 100%': { transform: 'scale(1)', opacity: '1' },
+          '50%': { transform: 'scale(1.35)', opacity: '0.7' },
+        },
+      },
+      animation: {
+        'fg-pulse': 'fg-pulse 0.8s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

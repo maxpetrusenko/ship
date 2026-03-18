@@ -33,6 +33,14 @@ export {
   updateApprovalStatus,
   expirePendingApprovals,
   getPendingApprovals,
+  // Recipient persistence
+  createRecipient,
+  createRecipients,
+  getUserAlerts,
+  getUnreadCount,
+  markRecipientsRead,
+  dismissRecipient,
+  snoozeRecipient,
   // Chat thread persistence
   getActiveThread,
   getThreadById,
@@ -42,6 +50,13 @@ export {
   loadRecentMessages,
   updateThreadPageContext,
 } from './persistence.js';
+
+// Re-export alert helpers
+export {
+  resolveAlertRecipients,
+  createAlertWithRecipients,
+  createApprovalFromAction,
+} from './alert-helpers.js';
 
 // Re-export queue for on-demand enqueue
 export { FleetGraphQueue, buildQueueFingerprint } from './queue.js';
@@ -60,6 +75,13 @@ export interface GraphInvocationResult {
   interrupted: boolean;
   /** The thread_id to use when resuming (same as runId). */
   threadId: string;
+}
+
+interface FleetGraphInvoker {
+  invoke(
+    state: FleetGraphRunState | Command,
+    config: { configurable: { thread_id: string } },
+  ): Promise<FleetGraphRunState>;
 }
 
 // -------------------------------------------------------------------------
@@ -93,7 +115,7 @@ export async function startFleetGraph(
   // Wire broadcast + gate pool into graph nodes
   setBroadcastFn((workspaceId, userId, event, payload) => {
     if (userId) {
-      broadcastFn(userId, event, payload as unknown as Record<string, unknown>);
+      broadcastFn(userId, event, payload);
     } else {
       // Proactive runs have no actorUserId; broadcast to all workspace members
       pool.query(
@@ -101,7 +123,7 @@ export async function startFleetGraph(
         [workspaceId],
       ).then((result) => {
         for (const row of result.rows) {
-          broadcastFn(row.user_id as string, event, payload as unknown as Record<string, unknown>);
+          broadcastFn(row.user_id as string, event, payload);
         }
       }).catch((err) => {
         console.error('[FleetGraph] Workspace broadcast failed:', err);
@@ -235,7 +257,7 @@ export async function resumeGraph(
   // as the return value of the interrupt() call in human_gate.
   const resumeCmd = new Command({ resume: gateOutcome });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Command generic mismatch with compiled graph invoke signature
-  const finalState = await graph.invoke(resumeCmd as any, config) as FleetGraphRunState;
+  const resumableGraph = graph as ReturnType<typeof createFleetGraph> & FleetGraphInvoker;
+  const finalState = await resumableGraph.invoke(resumeCmd, config);
   return { state: finalState, interrupted: false, threadId };
 }

@@ -1,23 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MissingAccountabilityItem } from '../../services/accountability.js';
-import type { ManagerActionItem } from './types.js';
 
-const mockCheckMissingAccountability = vi.fn<(userId: string, workspaceId: string) => Promise<MissingAccountabilityItem[]>>();
-const mockGetManagerActionItems = vi.fn<(userId: string, workspaceId: string) => Promise<ManagerActionItem[]>>();
-
-vi.mock('../../services/accountability.js', () => ({
-  checkMissingAccountability: (...args: [string, string]) => mockCheckMissingAccountability(...args),
-  getManagerActionItems: (...args: [string, string]) => mockGetManagerActionItems(...args),
-}));
-
-import { configureFleetGraphData, fetchCoreContext, fetchParallelSignals } from './fetchers.js';
+import {
+  configureFleetGraphData,
+  fetchActiveSprints,
+  fetchCoreContext,
+  fetchParallelSignals,
+} from './fetchers.js';
 
 const mockClientGet = vi.fn();
 
 describe('FleetGraph fetchers', () => {
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockClientGet.mockReset();
     configureFleetGraphData(
       {} as never,
       {
@@ -61,32 +56,40 @@ describe('FleetGraph fetchers', () => {
     });
   });
 
-  it('uses the current actor for workspace-scoped accountability signals', async () => {
-    mockCheckMissingAccountability.mockResolvedValue([
-      {
-        type: 'weekly_plan',
-        targetId: 'project-1',
-        targetTitle: 'Week 12 Plan - Core Project',
-        targetType: 'project',
-        dueDate: '2026-03-17',
-        message: 'Write week 12 plan for Core Project',
-        personId: 'person-1',
-        projectId: 'project-1',
-        weekNumber: 12,
-      },
-    ]);
-    mockGetManagerActionItems.mockResolvedValue([
-      {
-        employeeName: 'Alice',
-        employeeId: 'user-alice',
-        dueTime: '2026-03-17T09:00:00Z',
-        overdueMinutes: 45,
-        sprintId: 'sprint-1',
-        sprintTitle: 'Week 12',
-        projectId: 'project-1',
-        projectTitle: 'Core Project',
-      },
-    ]);
+  it('normalizes wrapped weeks responses for active sprints', async () => {
+    mockClientGet.mockResolvedValue({
+      weeks: [
+        {
+          id: 'sprint-1',
+          title: 'Week 1',
+          properties: {
+            sprint_number: 1,
+            status: 'active',
+            owner_id: 'user-1',
+          },
+          created_at: '2026-03-17T00:00:00.000Z',
+          updated_at: '2026-03-17T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const result = await fetchActiveSprints({ get: mockClientGet } as never);
+
+    expect(mockClientGet).toHaveBeenCalledWith('/api/weeks?status=active');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: 'sprint-1', title: 'Week 1' });
+  });
+
+  it('uses REST with forUserId for workspace-scoped accountability signals', async () => {
+    mockClientGet.mockImplementation(async (path: string) => {
+      if (path.includes('/api/accountability/action-items')) {
+        return { items: [{ type: 'weekly_plan', targetId: 'project-1' }] };
+      }
+      if (path.includes('/api/accountability/manager-action-items')) {
+        return { items: [{ employeeId: 'user-alice', overdueMinutes: 45 }] };
+      }
+      return [];
+    });
 
     const result = await fetchParallelSignals(
       'ws-1',
@@ -96,16 +99,14 @@ describe('FleetGraph fetchers', () => {
       null,
     );
 
-    expect(mockCheckMissingAccountability).toHaveBeenCalledWith('user-admin', 'ws-1');
-    expect(mockGetManagerActionItems).toHaveBeenCalledWith('user-admin', 'ws-1');
-    expect(result.accountability).toMatchObject({
-      items: [
-        expect.objectContaining({
-          accountability_type: 'weekly_plan',
-          days_overdue: 0,
-        }),
-      ],
-    });
+    // Verify REST calls with forUserId param (not direct service imports)
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/action-items?forUserId=user-admin',
+    );
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/manager-action-items?forUserId=user-admin',
+    );
+    expect(result.accountability).toBeTruthy();
     expect(result.managerActionItems).toEqual([
       expect.objectContaining({
         employeeId: 'user-alice',
@@ -115,8 +116,7 @@ describe('FleetGraph fetchers', () => {
   });
 
   it('falls back to the entity owner when proactive runs have no actor user', async () => {
-    mockCheckMissingAccountability.mockResolvedValue([]);
-    mockGetManagerActionItems.mockResolvedValue([]);
+    mockClientGet.mockResolvedValue({ items: [] });
 
     await fetchParallelSignals(
       'ws-1',
@@ -126,13 +126,17 @@ describe('FleetGraph fetchers', () => {
       'user-manager',
     );
 
-    expect(mockCheckMissingAccountability).toHaveBeenCalledWith('user-manager', 'ws-1');
-    expect(mockGetManagerActionItems).toHaveBeenCalledWith('user-manager', 'ws-1');
+    // Should use ownerUserId when actorUserId is null
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/action-items?forUserId=user-manager',
+    );
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/manager-action-items?forUserId=user-manager',
+    );
   });
 
   it('treats explicit workspace scope as workspace summary', async () => {
-    mockCheckMissingAccountability.mockResolvedValue([]);
-    mockGetManagerActionItems.mockResolvedValue([]);
+    mockClientGet.mockResolvedValue({ items: [] });
 
     await fetchParallelSignals(
       'ws-1',
@@ -142,8 +146,13 @@ describe('FleetGraph fetchers', () => {
       null,
     );
 
-    expect(mockCheckMissingAccountability).toHaveBeenCalledWith('user-admin', 'ws-1');
-    expect(mockGetManagerActionItems).toHaveBeenCalledWith('user-admin', 'ws-1');
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/action-items?forUserId=user-admin',
+    );
+    expect(mockClientGet).toHaveBeenCalledWith(
+      '/api/accountability/manager-action-items?forUserId=user-admin',
+    );
+    // Should not fetch issue history for workspace scope
     expect(mockClientGet).not.toHaveBeenCalledWith('/api/issues/ws-1/history');
   });
 });

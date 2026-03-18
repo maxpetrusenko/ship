@@ -16,12 +16,13 @@ import type { FleetGraphStateType } from './state.js';
 import { interrupt } from '@langchain/langgraph';
 import {
   executeShipAction,
-  persistAlert,
   persistAuditEntry,
 } from '../data/fetchers.js';
 import {
-  createApproval,
-} from '../runtime/persistence.js';
+  createAlertWithRecipients,
+  createApprovalFromAction,
+  resolveAlertRecipients,
+} from '../runtime/alert-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,26 +97,13 @@ export async function deliverAlert(
   if (!candidate) return {};
   console.log(`[FleetGraph:Node7] deliver_alert: ${candidate.signalType} severity=${candidate.severity} entity=${candidate.entityType}:${candidate.entityId}`);
 
-  // Persist alert record
-  const alertId = await persistAlert({
-    workspaceId: state.workspaceId,
-    fingerprint: candidate.fingerprint,
-    signalType: candidate.signalType,
-    entityType: candidate.entityType,
-    entityId: candidate.entityId,
-    severity: candidate.severity,
-    summary: state.assessment.summary,
-    recommendation: state.assessment.recommendation,
-    citations: state.assessment.citations,
-    ownerUserId: candidate.ownerUserId,
-    status: 'active',
-    snoozedUntil: null,
-    lastSurfacedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
+  // Persist alert + create recipient rows via shared helper
+  const alertId = _gatePool
+    ? await createAlertWithRecipients({ pool: _gatePool, candidate, assessment: state.assessment, state })
+    : 'no-pool';
 
-  // Broadcast realtime event
+  // Broadcast to each resolved recipient
+  const recipients = resolveAlertRecipients(candidate, state);
   const event: FleetGraphAlertEvent = {
     alertId,
     signalType: candidate.signalType,
@@ -123,9 +111,16 @@ export async function deliverAlert(
     entityId: candidate.entityId,
     severity: candidate.severity,
     summary: state.assessment.summary,
+    ownerUserId: candidate.ownerUserId,
   };
-  _broadcast(state.workspaceId, state.actorUserId, 'fleetgraph:alert', event);
-  console.log(`[FleetGraph:Node7] alert delivered: id=${alertId} broadcast to=${state.actorUserId ?? 'workspace'}`);
+  for (const userId of recipients) {
+    _broadcast(state.workspaceId, userId, 'fleetgraph:alert', event);
+  }
+  // Fallback: if no recipients resolved, broadcast to actor or workspace
+  if (recipients.length === 0) {
+    _broadcast(state.workspaceId, state.actorUserId, 'fleetgraph:alert', event);
+  }
+  console.log(`[FleetGraph:Node7] alert delivered: id=${alertId} recipients=${recipients.length}`);
 
   return {};
 }
@@ -138,52 +133,45 @@ export async function prepareAction(
   state: FleetGraphStateType,
 ): Promise<Partial<FleetGraphStateType>> {
   console.log(`[FleetGraph:Node8] prepare_action: hasAction=${!!state.assessment?.proposedAction} hasPool=${!!_gatePool}`);
-  // Persist the pending approval BEFORE the human_gate interrupt.
-  // The human_gate node pauses via interrupt(), so the approval must exist
-  // before that node runs so the UI and /resolve route can find it.
+  // Persist alert + approval BEFORE the human_gate interrupt.
   if (_gatePool && state.assessment?.proposedAction) {
     const candidate = state.candidates[0];
     if (candidate) {
-      const alertId = await persistAlert({
-        workspaceId: state.workspaceId,
-        fingerprint: candidate.fingerprint,
+      // Create alert + recipient rows via shared helper
+      const alertId = await createAlertWithRecipients({
+        pool: _gatePool,
+        candidate,
+        assessment: state.assessment,
+        state,
+      });
+
+      // Create approval record
+      const approval = await createApprovalFromAction({
+        pool: _gatePool,
+        alertId,
+        state,
+      });
+      if (approval) {
+        console.log(`[FleetGraph:Node8] approval created: id=${approval.id} action=${approval.actionType} target=${approval.targetEntityType}:${approval.targetEntityId}`);
+      }
+
+      // Broadcast to resolved recipients
+      const recipients = resolveAlertRecipients(candidate, state);
+      const event: FleetGraphAlertEvent = {
+        alertId,
         signalType: candidate.signalType,
         entityType: candidate.entityType,
         entityId: candidate.entityId,
         severity: candidate.severity,
         summary: state.assessment.summary,
-        recommendation: state.assessment.recommendation,
-        citations: state.assessment.citations,
         ownerUserId: candidate.ownerUserId,
-        status: 'active',
-      });
-
-      const action = state.assessment.proposedAction;
-      const approval = await createApproval(_gatePool, {
-        workspaceId: state.workspaceId,
-        alertId,
-        runId: state.runId,
-        threadId: state.runId,
-        checkpointId: null,
-        actionType: action.actionType,
-        targetEntityType: action.targetEntityType,
-        targetEntityId: action.targetEntityId,
-        description: action.description,
-        payload: action.payload,
-        status: 'pending',
-        expiresAt: new Date(Date.now() + 72 * 60 * 60_000).toISOString(),
-      });
-      console.log(`[FleetGraph:Node8] approval created: id=${approval.id} action=${action.actionType} target=${action.targetEntityType}:${action.targetEntityId}`);
-
-      // Broadcast the alert so UI renders it immediately
-      _broadcast(state.workspaceId, state.actorUserId, 'fleetgraph:alert', {
-        alertId,
-        signalType: candidate.signalType,
-        entityType: candidate.entityType,
-        entityId: candidate.entityId,
-        severity: candidate.severity,
-        summary: state.assessment.summary,
-      });
+      };
+      for (const userId of recipients) {
+        _broadcast(state.workspaceId, userId, 'fleetgraph:alert', event);
+      }
+      if (recipients.length === 0) {
+        _broadcast(state.workspaceId, state.actorUserId, 'fleetgraph:alert', event);
+      }
     }
   }
 

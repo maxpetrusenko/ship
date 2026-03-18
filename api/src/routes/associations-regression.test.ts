@@ -4,6 +4,19 @@ import crypto from 'crypto'
 import { createApp } from '../app.js'
 import { pool } from '../db/client.js'
 
+interface BelongsToAssociation {
+  id: string
+  type: 'program' | 'project' | 'sprint' | 'parent'
+}
+
+interface IssueSummary {
+  id: string
+}
+
+interface IssuesPayload {
+  items?: IssueSummary[]
+}
+
 /**
  * Regression test suite for unified document model associations.
  * Tests junction table, belongs_to format, and multi-parent associations.
@@ -201,8 +214,9 @@ describe('Associations Regression Tests', () => {
       expect(response.body.belongs_to).toBeDefined()
       expect(response.body.belongs_to.length).toBe(2)
 
-      const projectAssoc = response.body.belongs_to.find((b: any) => b.type === 'project')
-      const sprintAssoc = response.body.belongs_to.find((b: any) => b.type === 'sprint')
+      const belongsTo = response.body.belongs_to as BelongsToAssociation[]
+      const projectAssoc = belongsTo.find((association) => association.type === 'project')
+      const sprintAssoc = belongsTo.find((association) => association.type === 'sprint')
 
       expect(projectAssoc).toBeDefined()
       expect(projectAssoc.id).toBe(testProject1Id)
@@ -320,10 +334,11 @@ describe('Associations Regression Tests', () => {
 
       expect(response.status).toBe(200)
 
-      const projectAssocs = response.body.belongs_to.filter((b: any) => b.type === 'project')
+      const belongsTo = response.body.belongs_to as BelongsToAssociation[]
+      const projectAssocs = belongsTo.filter((association) => association.type === 'project')
       expect(projectAssocs.length).toBe(2)
 
-      const projectIds = projectAssocs.map((p: any) => p.id).sort()
+      const projectIds = projectAssocs.map((association) => association.id).sort()
       expect(projectIds).toEqual([testProject1Id, testProject2Id].sort())
     })
 
@@ -343,7 +358,7 @@ describe('Associations Regression Tests', () => {
       expect(response.status).toBe(200)
       expect(Array.isArray(response.body)).toBe(true)
 
-      const issueIds = response.body.map((i: any) => i.id)
+      const issueIds = (response.body as IssueSummary[]).map((issue) => issue.id)
       expect(issueIds).toContain(testIssueId)
     })
   })
@@ -431,8 +446,11 @@ describe('Associations Regression Tests', () => {
       expect(response.body.issues).toBeDefined()
 
       // Should include our test issue
-      const issueList = response.body.issues.items || response.body.issues
-      const testIssue = issueList.find((i: any) => i.id === testIssueId)
+      const issueContainer = response.body.issues as IssuesPayload | IssueSummary[]
+      const issueList = Array.isArray(issueContainer)
+        ? issueContainer
+        : issueContainer.items ?? []
+      const testIssue = issueList.find((issue) => issue.id === testIssueId)
       expect(testIssue).toBeDefined()
     })
 

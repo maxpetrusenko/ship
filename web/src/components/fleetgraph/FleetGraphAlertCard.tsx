@@ -16,6 +16,7 @@ const SIGNAL_LABELS: Record<FleetGraphSignalType, string> = {
   approval_bottleneck: 'Approval Bottleneck',
   ownership_gap: 'Ownership Gap',
   multi_signal_cluster: 'Multiple Signals',
+  chat_suggestion: 'Chat Suggestion',
 };
 
 const SEVERITY_STYLES: Record<AlertSeverity, { bg: string; text: string; border: string; icon: string }> = {

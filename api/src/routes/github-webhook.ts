@@ -91,12 +91,21 @@ export function extractIssueRefs(text: string): { ticketNumbers: number[]; uuids
 // Resolve ticket numbers to document UUIDs
 // -------------------------------------------------------------------------
 
-async function resolveTicketNumbers(ticketNumbers: number[]): Promise<string[]> {
-  if (ticketNumbers.length === 0) return [];
+async function resolveIssueRefs(
+  workspaceId: string,
+  refs: { ticketNumbers: number[]; uuids: string[] },
+): Promise<string[]> {
+  if (refs.ticketNumbers.length === 0 && refs.uuids.length === 0) return [];
 
   const result = await pool.query(
-    `SELECT id FROM documents WHERE ticket_number = ANY($1)`,
-    [ticketNumbers],
+    `SELECT id FROM documents
+     WHERE workspace_id = $1
+       AND document_type = 'issue'
+       AND (
+         ticket_number = ANY($2::int[])
+         OR id::text = ANY($3::text[])
+       )`,
+    [workspaceId, refs.ticketNumbers, refs.uuids],
   );
   return result.rows.map((row) => row.id as string);
 }
@@ -158,10 +167,14 @@ router.post('/', async (req: Request, res: Response) => {
     return res.json({ ok: true, processed: false, reason: 'no text to parse' });
   }
 
+  const workspaceId = process.env.FLEETGRAPH_WORKSPACE_ID ?? '';
+  if (!workspaceId) {
+    return res.json({ ok: true, processed: false, reason: 'FLEETGRAPH_WORKSPACE_ID not set' });
+  }
+
   // Extract issue references
   const refs = extractIssueRefs(text);
-  const resolvedIds = await resolveTicketNumbers(refs.ticketNumbers);
-  const allIds = [...new Set([...resolvedIds, ...refs.uuids])];
+  const allIds = await resolveIssueRefs(workspaceId, refs);
 
   if (allIds.length === 0) {
     return res.json({ ok: true, processed: false, reason: 'no issue refs found' });
@@ -171,11 +184,6 @@ router.post('/', async (req: Request, res: Response) => {
   const scheduler = getScheduler();
   if (!scheduler) {
     return res.json({ ok: true, processed: false, reason: 'scheduler not running' });
-  }
-
-  const workspaceId = process.env.FLEETGRAPH_WORKSPACE_ID ?? '';
-  if (!workspaceId) {
-    return res.json({ ok: true, processed: false, reason: 'FLEETGRAPH_WORKSPACE_ID not set' });
   }
 
   const queue = scheduler.getQueue();

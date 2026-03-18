@@ -12,6 +12,7 @@ import { useCurrentDocument } from '@/contexts/CurrentDocumentContext';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { useIssues } from '@/contexts/IssuesContext';
 import { useProjects } from '@/contexts/ProjectsContext';
+import { useActiveWeeksQuery } from '@/hooks/useWeeksQuery';
 import type { FleetGraphEntityType } from '@ship/shared';
 
 export type FleetGraphScopeType = FleetGraphEntityType | 'workspace';
@@ -20,6 +21,11 @@ export interface FleetGraphScope {
   scopeType: FleetGraphScopeType;
   scopeId: string;
   scopeLabel: string;
+}
+
+function extractUnifiedDocumentId(pathname: string): string | null {
+  const match = pathname.match(/^\/documents\/([^/]+)/);
+  return match?.[1] ?? null;
 }
 
 /** Maps CurrentDocumentContext document types to FleetGraph entity types. */
@@ -71,18 +77,43 @@ export function useFleetGraphScope(): FleetGraphScope {
   // Look up entity title from loaded context lists
   const { issues } = useIssues();
   const { projects } = useProjects();
+  const { data: weeks } = useActiveWeeksQuery();
+
+  /** Resolve title for any entity type. */
+  function lookupTitle(entityType: FleetGraphEntityType, entityId: string): string | undefined {
+    if (entityType === 'issue') {
+      return issues.find((i) => i.id === entityId)?.title || undefined;
+    }
+    if (entityType === 'project') {
+      return projects.find((p) => p.id === entityId)?.title || undefined;
+    }
+    if (entityType === 'sprint') {
+      return weeks?.weeks?.find((w: { id: string; name: string }) => w.id === entityId)?.name || undefined;
+    }
+    return undefined;
+  }
+
+  function inferEntityTypeFromDocumentId(documentId: string): FleetGraphEntityType | null {
+    if (issues.some((issue) => issue.id === documentId)) {
+      return 'issue';
+    }
+    if (projects.some((project) => project.id === documentId)) {
+      return 'project';
+    }
+    if (weeks?.weeks?.some((week: { id: string }) => week.id === documentId)) {
+      return 'sprint';
+    }
+    return null;
+  }
 
   return useMemo(() => {
+    console.log('[FleetGraph:Scope] resolving', { currentDocumentType, currentDocumentId, pathname: location.pathname });
     // 1. Document context (highest priority)
     if (currentDocumentType && currentDocumentId) {
       const entityType = DOC_TYPE_TO_ENTITY[currentDocumentType];
+      console.log('[FleetGraph:Scope] docContext hit', { currentDocumentType, entityType: entityType ?? 'UNMAPPED' });
       if (entityType) {
-        let title: string | undefined;
-        if (entityType === 'issue') {
-          title = issues.find((i) => i.id === currentDocumentId)?.title || undefined;
-        } else if (entityType === 'project') {
-          title = projects.find((p) => p.id === currentDocumentId)?.title || undefined;
-        }
+        const title = lookupTitle(entityType, currentDocumentId);
         const label = title || `${entityType} ${currentDocumentId.slice(0, 8)}`;
         return {
           scopeType: entityType,
@@ -95,12 +126,7 @@ export function useFleetGraphScope(): FleetGraphScope {
     // 2. Route parsing (legacy routes only; unified /documents/:id is handled above)
     const routeScope = parseScopeFromPath(location.pathname);
     if (routeScope) {
-      let title: string | undefined;
-      if (routeScope.entityType === 'issue') {
-        title = issues.find((i) => i.id === routeScope.entityId)?.title || undefined;
-      } else if (routeScope.entityType === 'project') {
-        title = projects.find((p) => p.id === routeScope.entityId)?.title || undefined;
-      }
+      const title = lookupTitle(routeScope.entityType, routeScope.entityId);
       const label = title || `${routeScope.entityType} ${routeScope.entityId.slice(0, 8)}`;
       return {
         scopeType: routeScope.entityType,
@@ -109,11 +135,27 @@ export function useFleetGraphScope(): FleetGraphScope {
       };
     }
 
+    const unifiedDocumentId = extractUnifiedDocumentId(location.pathname);
+    if (unifiedDocumentId) {
+      const inferredEntityType = inferEntityTypeFromDocumentId(unifiedDocumentId);
+      if (inferredEntityType) {
+        const title = lookupTitle(inferredEntityType, unifiedDocumentId);
+        const label = title || `${inferredEntityType} ${unifiedDocumentId.slice(0, 8)}`;
+        return {
+          scopeType: inferredEntityType,
+          scopeId: unifiedDocumentId,
+          scopeLabel: label,
+        };
+      }
+    }
+
     // 3. Workspace fallback (always available)
+    console.log('[FleetGraph:Scope] falling back to workspace');
     return {
       scopeType: 'workspace' as FleetGraphScopeType,
       scopeId: currentWorkspace?.id ?? 'default',
       scopeLabel: currentWorkspace?.name ?? 'Workspace',
     };
-  }, [currentDocumentType, currentDocumentId, location.pathname, currentWorkspace, issues, projects]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDocumentType, currentDocumentId, location.pathname, currentWorkspace, issues, projects, weeks]);
 }

@@ -1,283 +1,117 @@
-# FleetGraph Global Chat Persistence and Live Context Design
+# FleetGraph Global Chat Context Design
 
 ## Goal
 
-Keep FleetGraph as one global chat per user and workspace, preserve the conversation across refreshes and server restarts, inject live page context on every turn, and ensure the assistant only sees data the current user can access.
+Keep FleetGraph as one global chat per user and workspace, preserve the thread across refreshes and API restarts, inject live page context on every turn, and harden the current branch so page awareness stays correct and active-thread lookup stays unambiguous.
 
-## Problem
+## Current Branch Baseline
 
-Current FleetGraph chat is session-local in the browser and process-local on the server.
+This plan starts from the code already on this branch.
 
-- Refresh loses visible state in the UI.
-- API restart loses thread history because chat state lives in an in-memory `Map` in `api/src/routes/fleetgraph.ts`.
-- Scope is derived correctly for FleetGraph analysis, but the assistant does not reliably acknowledge the actual page the user is on.
-- `confirm_action` messages read like suggestions more than actionable controls.
-- There is no explicit `New chat` affordance.
+Already present:
 
-This leads to a bad UX for long-running work: the user can move around the app, come back after a restart, and lose the conversation or have the assistant ignore the current page.
+- DB-backed `fleetgraph_chat_threads` and `fleetgraph_chat_messages`
+- `GET /api/fleetgraph/chat/thread`
+- `POST /api/fleetgraph/chat/thread`
+- `POST /api/fleetgraph/chat` with `threadId`
+- server-side thread hydration from Postgres
+- client thread hydration plus `New Thread` and `/new`
+- per-turn `pageContext` payload in chat requests
+
+Key references:
+
+- `api/src/routes/fleetgraph.ts`
+- `api/src/fleetgraph/runtime/persistence.ts`
+- `shared/src/types/fleetgraph.ts`
+- `web/src/hooks/useFleetGraph.ts`
+- `web/src/components/fleetgraph/FleetGraphChat.tsx`
+
+This doc describes the delta from that baseline. It is not a plan to re-introduce persistence from scratch.
+
+## Remaining Problems
+
+### 1. Page context is still too thin
+
+The current client hook sends route, scope-derived surface, document id, and title. That is enough for continuity, but it is still missing the richer page-awareness this feature wants:
+
+- docs/wiki surface detection
+- empty-page detection
+- breadcrumbs and associations
+- explicit document type
+
+Current code also falls back to `workspace` when the scope is outside `issue | project | sprint | workspace`, so docs pages are not described precisely enough yet.
+
+### 2. Empty-page detection must use normalized content
+
+`GET /api/documents/:id` is the wrong source for deciding whether a page is empty. That route returns metadata and associations. It does not normalize collaborative content from `yjs_state`.
+
+For emptiness and drafting bias, use one of:
+
+- editor-side cached TipTap content when the current page is already loaded in the app
+- `GET /api/documents/:id/content` when cached editor content is unavailable
+
+`GET /api/documents/:id/content` is the route that converts `yjs_state` into TipTap JSON when `content` is null, so it matches the real document body the user sees.
+
+### 3. Single active thread needs a database invariant
+
+Current code archives existing active threads before inserting a new one, and `GET /chat/thread` resolves ambiguity with `ORDER BY updated_at DESC LIMIT 1`.
+
+That is helpful, but it is still application-level enforcement. The design requirement is stronger:
+
+- exactly one active thread per `user + workspace`
+- `/new` archives the previous active thread before the new one becomes active
+- `GET /chat/thread` is deterministic because the database guarantees the invariant
+
+This should be enforced with a partial unique index on active threads, plus thread-creation logic that archives and inserts atomically.
+
+### 4. Per-turn page context auditability is partial
+
+The branch stores last-page metadata on the thread row, which is enough for current UX. It does not yet persist full `pageContext` alongside each message.
+
+If turn-by-turn auditability matters for debugging, replay, or future summarization, add `page_context_json` to `fleetgraph_chat_messages`. If thread-level last-page metadata is sufficient, keep the simpler model and state that choice explicitly.
+
+### 5. Action confirmations are partly shipped already
+
+The branch already has inline `Approve` and `Dismiss` controls in chat and fuller approval controls elsewhere in FleetGraph UI. Any remaining design work here is incremental:
+
+- add `Snooze` in chat if desired
+- expose direct executable CTAs only when wired
+- keep `Suggested only` labeling when there is no linked alert
 
 ## Product Decisions
 
-### 1. One global chat
+### 1. Keep the global-thread model
 
-FleetGraph keeps one active chat thread per `user + workspace`.
+One active thread per `user + workspace` remains the right model.
 
-- The thread persists in the database.
-- The user can explicitly start a fresh thread with a header `+` button or `/new` in the input.
-- Scope changes do not clear the thread.
-- The current page is injected into each turn as runtime context.
+- scope changes do not clear the thread
+- current page context is injected per turn
+- the active thread persists across refreshes and restarts
 
-This is intentionally different from a per-page or per-entity thread model. The thread is global; the context is per turn.
+### 2. Rebase future work on the current branch
 
-### 2. Page context is first-class
+No design or implementation note should describe chat as process-local anymore. Persistence, thread endpoints, and `threadId` support are part of the baseline.
 
-Every message send includes a page envelope describing where the user currently is.
+### 3. Empty-page detection uses content, not metadata
 
-Minimum fields:
+The source of truth for page emptiness is normalized document content:
 
-- route
-- page surface: `docs`, `issue`, `project`, `sprint`, or `workspace`
-- document id when present
-- title when present
-- document type when present
-- empty or non-empty state
-- lightweight breadcrumb and association context when available
+- first choice: editor-side cached TipTap JSON
+- fallback: `GET /api/documents/:id/content`
 
-This allows replies like:
+`GET /api/documents/:id` can still supply title or associations, but never emptiness.
 
-- `You're in Docs / Architecture Guide. This page is empty. Need help drafting?`
-- `You're in Project X / Week 11 retro. I can summarize risks or help rewrite this.`
+### 4. Active-thread uniqueness is a hard invariant
 
-### 3. No screenshot dependence
+The system should guarantee one active thread per `user + workspace` at the database level.
 
-The assistant should use app and API state, not screenshots, for routine page awareness.
+Minimum requirement:
 
-Primary sources already exist:
+- partial unique index for rows where `status = 'active'`
+- archive previous active thread before or within the same transaction as new-thread creation
+- tests that cover repeated `/new` and concurrent creation attempts
 
-- route plus `CurrentDocumentContext`
-- `GET /api/documents/:id`
-- `GET /api/documents/:id/context`
-
-Screenshots remain optional debugging evidence, not the normal context path.
-
-### 4. Access policy must be real
-
-FleetGraph should not invent a broader access model than the rest of the app.
-
-Today, current access is primarily:
-
-- workspace member: workspace-visible documents
-- creator: own private documents
-- admin: full workspace visibility
-
-Future role policy can narrow this further, for example:
-
-- `dev`: assigned projects, assigned issues, and related sprint context only
-
-FleetGraph must respect the same access rules the user already has through normal routes. If context cannot be read through the authenticated session, FleetGraph cannot use it.
-
-### 5. Action confirmations must be actionable
-
-`confirm_action` cards need real controls, not only text.
-
-Minimum controls:
-
-- `Approve`
-- `Dismiss`
-- `Snooze`
-
-If a proposed domain action is fully wired, show the direct action CTA. If it is not fully wired, the UI should say so explicitly rather than pretending the feature exists.
-
-### 6. Missing capability must be traceable
-
-If page-aware prompting, role policy, or executable action coverage is only partial in a given milestone, the gap should be documented in `docs/plans` and implementation notes so the team can trace what shipped and what remains.
-
-## Current System Constraints
-
-### Existing page context sources
-
-- `web/src/contexts/CurrentDocumentContext.tsx`
-- `web/src/pages/UnifiedDocumentPage.tsx`
-- `web/src/hooks/useFleetGraphScope.ts`
-- `api/src/routes/documents.ts`
-- `api/src/routes/associations.ts`
-
-### Existing FleetGraph chat path
-
-- `web/src/components/fleetgraph/FleetGraphChat.tsx`
-- `web/src/hooks/useFleetGraph.ts`
-- `api/src/routes/fleetgraph.ts`
-- `shared/src/types/fleetgraph.ts`
-
-### Main limitation
-
-`api/src/routes/fleetgraph.ts` stores conversation history in a process-local `Map`. That makes the feature inherently non-persistent and restart-unsafe.
-
-## Architecture
-
-## A. Persistence model
-
-Add two FleetGraph chat tables:
-
-### `fleetgraph_chat_threads`
-
-- `id`
-- `workspace_id`
-- `user_id`
-- `title` nullable
-- `status` as `active | archived`
-- `created_at`
-- `updated_at`
-- `last_page_type` nullable
-- `last_page_id` nullable
-- `last_page_title` nullable
-- `last_route` nullable
-
-### `fleetgraph_chat_messages`
-
-- `id`
-- `thread_id`
-- `role`
-- `content`
-- `assessment_json` nullable
-- `debug_json` nullable
-- `page_context_json` nullable
-- `created_at`
-
-This supports:
-
-- restart-safe persistence
-- future chat history UI
-- turn-by-turn auditability of what page context was present
-
-## B. Request flow
-
-### On the client
-
-When the user submits a message:
-
-1. Resolve current page context from route and app state.
-2. If on a document page, fetch document and document-context data only if not already cached.
-3. Send:
-   - `threadId`
-   - `question`
-   - current FleetGraph entity scope
-   - `pageContext`
-
-### On the server
-
-1. Authenticate user and workspace as usual.
-2. Verify the requested thread belongs to `user + workspace`.
-3. Verify any supplied `documentId` is readable by that user.
-4. Load recent thread history from the database.
-5. Build the graph input with:
-   - prior thread history
-   - current page context
-   - current question
-   - current entity scope
-6. Persist both user and assistant messages.
-7. Return assistant message plus updated thread metadata.
-
-## C. Prompt assembly
-
-The assistant should receive two layers of context:
-
-### Stable thread history
-
-What the user asked earlier and what FleetGraph answered earlier.
-
-### Current-turn page context
-
-Where the user is right now. This should be treated as current truth even when the thread itself is older.
-
-This allows a single global thread to move across pages without losing continuity or pretending the page never changed.
-
-## D. Access policy layer
-
-Add one server-side access helper for FleetGraph chat hydration.
-
-Responsibilities:
-
-- resolve whether the user can access a document or entity
-- filter page-context enrichment to accessible records only
-- support future custom role narrowing such as `dev -> assigned projects only`
-- centralize permission logic so FleetGraph does not drift from app behavior
-
-This helper should gate:
-
-- page context hydration
-- thread restoration
-- suggested follow-up data fetches
-- proactive and on-demand action suggestions
-
-## E. UI behavior
-
-### Header
-
-The floating chat header should show both FleetGraph identity and page identity.
-
-Suggested structure:
-
-- `FleetGraph`
-- workspace chip
-- page chip:
-  - `Docs`
-  - `Architecture Guide`
-  - `Empty`
-
-### New chat
-
-Add:
-
-- a `+` button in the header
-- `/new` input command
-
-Both create a fresh active thread.
-
-### Empty page behavior
-
-If the current page is a wiki or docs page with effectively empty content, the assistant should bias toward drafting help.
-
-Quick prompts can become page-aware:
-
-- `Draft outline`
-- `Write intro`
-- `Create architecture template`
-
-### Action confirmations
-
-`confirm_action` cards should surface executable controls and explicit unsupported states:
-
-- `Approve`
-- `Dismiss`
-- `Snooze`
-- domain action button when available
-- `Suggested only` label when not available
-
-## API Changes
-
-### Shared types
-
-Extend `shared/src/types/fleetgraph.ts` with:
-
-- `FleetGraphPageContext`
-- persistent thread response shapes
-- thread metadata
-
-### API routes
-
-Add or extend these routes in `api/src/routes/fleetgraph.ts`:
-
-- `GET /api/fleetgraph/chat/thread`
-  - return current active thread plus recent messages
-- `POST /api/fleetgraph/chat/thread`
-  - create a new thread
-- `POST /api/fleetgraph/chat`
-  - append message to existing or active thread using `pageContext`
-
-The current in-memory conversation store should be removed once database-backed storage is in place.
-
-## Data Contract
+### 5. Page context stays small but correct
 
 Recommended page-context shape:
 
@@ -294,59 +128,89 @@ type FleetGraphPageContext = {
 };
 ```
 
-This should stay intentionally small. It is enough to guide the assistant without turning every message send into a full document export.
+This remains intentionally small. The goal is correct page framing, not full document export.
+
+### 6. Access rules stay aligned with document routes
+
+FleetGraph should only use page data the authenticated user can already access through the normal app.
+
+That applies to:
+
+- page-context enrichment
+- content-based emptiness checks
+- any breadcrumb or association hydration
+
+## Architecture Delta
+
+### A. Thread persistence
+
+Keep the existing DB-backed thread model. Harden it with:
+
+- DB-enforced active-thread uniqueness
+- deterministic archive/create behavior
+- clear docs on whether per-message page context is required
+
+### B. Client page-context builder
+
+Extend the current client hook so it can:
+
+1. detect docs/wiki pages explicitly
+2. reuse editor-side content when already loaded
+3. fetch `/api/documents/:id/content` only when needed
+4. fetch association/context data only for lightweight page framing
+
+### C. Server-side validation
+
+Before using any supplied `pageContext.documentId`, verify the document is readable for the current user and workspace through the same access rules as document routes.
+
+### D. Prompt assembly
+
+Stable thread history comes from the persisted thread.
+
+Current-turn page context comes from the current route and accessible page data.
+
+If the two disagree, current-turn page context wins.
+
+## API Notes
+
+Current routes already exist:
+
+- `GET /api/fleetgraph/chat/thread`
+- `POST /api/fleetgraph/chat/thread`
+- `POST /api/fleetgraph/chat`
+
+Current documents routes already exist:
+
+- `GET /api/documents/:id`
+- `GET /api/documents/:id/content`
+
+Design implication:
+
+- thread APIs are baseline
+- `/api/documents/:id/content` is the required route for emptiness checks
+- `/api/documents/:id` stays metadata-only for this feature
 
 ## Testing Strategy
 
-Per current repo guidance, skip browser e2e for AI chat. Use API, component, and unit coverage.
+Per repo guidance, skip browser e2e for AI chat. Use API, unit, and component coverage.
 
 Required coverage:
 
-- thread survives route change and reload
-- server restart simulation restores persisted thread
+- active thread survives reload and route change
+- repeated `/new` archives the previous active thread
+- concurrent thread creation keeps one active thread
 - page context changes without clearing the thread
-- empty docs page produces drafting-oriented assistant framing
-- inaccessible document context is not injected
-- `+` creates new thread
-- `/new` creates new thread
-- `confirm_action` renders actionable controls
-- custom access policy can narrow visible scope for non-admin roles
-
-## Rollout Notes
-
-### Milestone 1
-
-- DB-backed persistence
-- active-thread APIs
-- client page-context payload
-- `+` and `/new`
-
-### Milestone 2
-
-- page-aware quick prompts
-- empty-page drafting bias
-- action-card improvements
-
-### Milestone 3
-
-- explicit FleetGraph role-policy helper
-- future thread history picker
-- message compaction and summaries
-
-## Known Gaps to Track If Only Partially Shipped
-
-- custom role narrowing beyond current workspace and visibility rules
-- per-action execution coverage for all suggested actions
-- thread history browser beyond single active thread
+- Yjs-backed docs are not misclassified as empty
+- inaccessible document context is dropped
+- docs/wiki page context reports the correct surface
+- drafting-oriented prompts only appear when normalized content is actually empty
 
 ## Final Position
 
-FleetGraph should behave like a persistent workspace assistant with live page awareness, not a disposable per-refresh widget and not a screenshot-driven chatbot.
+FleetGraph already crossed the persistence line on this branch. The remaining work is hardening and richer page-awareness:
 
-One global thread plus strict per-turn page context is the cleanest model for this repo:
-
-- stable user continuity
-- accurate current-page awareness
-- access-safe data use
-- room for future role-based narrowing
-
+- keep the DB-backed global thread model
+- stop describing chat as in-memory or restart-unsafe
+- derive emptiness from normalized document content
+- enforce one active thread with a DB invariant
+- enrich page context without broadening access

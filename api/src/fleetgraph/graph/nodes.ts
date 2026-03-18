@@ -30,6 +30,9 @@ import {
   getLangSmithProjectName,
   resolveLangSmithRunUrl,
 } from '../runtime/langsmith.js';
+import { extractText } from '../../utils/document-content.js';
+import { sortCandidatesByPriority } from './candidate-priority.js';
+import { getIssueScopeDriftEvidence } from './scope-drift.js';
 
 // Re-export terminal nodes so builder can import from one place
 export {
@@ -112,6 +115,80 @@ function getIssueUpdatedAtDaysAgo(ctx: Record<string, unknown>): number | null {
 
   const DAY_MS = 86_400_000;
   return Math.floor((Date.now() - timestamp) / DAY_MS);
+}
+
+const TOPIC_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'be', 'but', 'by', 'do', 'for',
+  'from', 'has', 'have', 'in', 'into', 'is', 'it', 'its', 'let',
+  'of', 'on', 'or', 'our', 'project', 'ship', 'that',
+  'the', 'their', 'this', 'to', 'up', 'we', 'with', 'work',
+]);
+
+function tokenizeTopicText(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !TOPIC_STOP_WORDS.has(token));
+}
+
+function getProjectContentScopeDriftEvidence(ctx: Record<string, unknown>): Record<string, unknown> | null {
+  const entity = ctx.entity;
+  if (!entity || typeof entity !== 'object') {
+    return null;
+  }
+
+  const entityRecord = entity as Record<string, unknown>;
+  const contentText = extractText(entityRecord.content).trim();
+  if (contentText.length < 20) {
+    return null;
+  }
+
+  const contentTokens = new Set(tokenizeTopicText(contentText));
+  if (contentTokens.size < 3) {
+    return null;
+  }
+
+  const topicSources: string[] = [];
+  if (typeof entityRecord.title === 'string') {
+    topicSources.push(entityRecord.title);
+  }
+
+  const properties = entityRecord.properties;
+  if (properties && typeof properties === 'object') {
+    const plan = (properties as Record<string, unknown>).plan;
+    if (typeof plan === 'string' && plan.trim().length > 0) {
+      topicSources.push(plan);
+    }
+  }
+
+  const relatedEntities = ctx.relatedEntities;
+  if (Array.isArray(relatedEntities)) {
+    for (const related of relatedEntities) {
+      if (!related || typeof related !== 'object') continue;
+      const title = (related as Record<string, unknown>).title
+        ?? (related as Record<string, unknown>).related_title;
+      if (typeof title === 'string' && title.trim().length > 0) {
+        topicSources.push(title);
+      }
+    }
+  }
+
+  const topicTokens = new Set(tokenizeTopicText(topicSources.join(' ')));
+  if (topicTokens.size < 3) {
+    return null;
+  }
+
+  const overlap = [...contentTokens].filter((token) => topicTokens.has(token));
+  if (overlap.length > 0) {
+    return null;
+  }
+
+  return {
+    scopeDrift: true,
+    reason: 'project_content_topic_mismatch',
+    contentExcerpt: contentText.slice(0, 200),
+    topicReference: topicSources.slice(0, 5),
+  };
 }
 
 interface AccountabilityItemLike {
@@ -249,7 +326,10 @@ async function traceDeterministicAssessment(
 
   let traceUrl = state.traceUrl;
   let traceRunId: string | null = null;
-  let traceClient: { getRunUrl: (args: { runId: string }) => Promise<string> } | null = null;
+  let traceClient: {
+    readRunSharedLink: (runId: string) => Promise<string | undefined>;
+    shareRun: (runId: string) => Promise<string>;
+  } | null = null;
   const tracedDeterministicAssessment = traceable(
     async (_payload: DeterministicTracePayload) => assessment,
     {
@@ -504,14 +584,23 @@ export async function heuristicFilter(
 
   // --- Scope drift check ---
   const scopeDrift = (signals as Record<string, unknown>)['scopeDrift'];
-  if (scopeDrift === true && THRESHOLDS.scopeDriftImmediate && state.entityId) {
+  const projectContentScopeDrift = state.entityType === 'project'
+    ? getProjectContentScopeDriftEvidence(ctx)
+    : null;
+  const issueContentScopeDrift = state.entityType === 'issue'
+    ? getIssueScopeDriftEvidence(
+        ctx,
+        ((signals as Record<string, unknown>).issueHistory as Array<{ field: string; old_value: unknown; new_value: unknown }>) ?? [],
+      )
+    : null;
+  if ((scopeDrift === true || projectContentScopeDrift || issueContentScopeDrift) && THRESHOLDS.scopeDriftImmediate && state.entityId) {
     const eType = state.entityType ?? 'sprint';
     candidates.push({
       signalType: 'scope_drift',
       entityType: eType,
       entityId: state.entityId,
-      severity: 'high',
-      evidence: { scopeDrift: true },
+      severity: issueContentScopeDrift?.severity ?? 'high',
+      evidence: (issueContentScopeDrift ?? projectContentScopeDrift ?? { scopeDrift: true }) as Record<string, unknown>,
       ownerUserId,
       fingerprint: fingerprint('scope_drift', eType, state.entityId, state.workspaceId),
     });
@@ -556,29 +645,29 @@ export async function heuristicFilter(
     }
   }
 
-  const branch: FleetGraphBranch = candidates.length === 0 ? 'clean' : 'inform_only';
-  console.log(`[FleetGraph:Node4] heuristic_filter -> branch=${branch} candidates=${candidates.length} signals=[${candidates.map(c => c.signalType).join(',')}]`);
-  return { candidates, branch };
+  const orderedCandidates = sortCandidatesByPriority(candidates);
+  const branch: FleetGraphBranch = orderedCandidates.length === 0 ? 'clean' : 'inform_only';
+  console.log(`[FleetGraph:Node4] heuristic_filter -> branch=${branch} candidates=${orderedCandidates.length} signals=[${orderedCandidates.map(c => c.signalType).join(',')}]`);
+  return { candidates: orderedCandidates, branch };
 }
 
 // ---------------------------------------------------------------------------
 // 5. reason_about_risk
 // ---------------------------------------------------------------------------
 
-const REASONING_SYSTEM_PROMPT = `You are FleetGraph, a conversational project health analyst for the Ship project management tool.
+export const REASONING_SYSTEM_PROMPT = `You are FleetGraph for Ship.
 
-When a "userQuestion" is present, you are having a natural conversation with the user about their entity. Answer their question directly and conversationally using the available data (coreContext, parallelSignals, candidates). Be helpful, concise, and human. If the question is unrelated to project management (e.g. math, trivia), answer it briefly and naturally, then optionally note any relevant health observations. If "conversationHistory" is present, use prior messages for context to maintain a coherent thread.
+Keep chat answers short, direct, and grounded in the provided Ship data.
+Stay inside the provided Ship scope, entity, workspace, page context, and chat history. Do not imply access beyond that scope.
 
-If parallelSignals.accountability.items contains pending or overdue items, lead with the exact counts. Never say there are no overdue items when that array contains any item with days_overdue >= 0. If managerActionItems contains entries, mention the affected people and how overdue they are. Treat workspace-summary questions as cross-workspace triage for the current actor, not as a project detail view.
+If userQuestion is unrelated to Ship, project health, the current page, or the current workspace/entity, do not answer it. Reply with a short redirect to Ship-only help. In that case, use branch="inform_only", proposedAction=null, and cite "chat:unsupported_topic".
 
-When no "userQuestion" is present, analyze signal candidates detected by deterministic heuristics:
-1. Assess the overall risk level and urgency.
-2. Write a concise human-readable summary (2-3 sentences max).
-3. Provide a recommendation: either "inform_only" (just alert the user) or "confirm_action" (propose a concrete action that needs human approval).
-4. If "confirm_action", include a proposed action with actionType, target entity, description, and payload.
-5. Cite the evidence that led to each conclusion.
+If parallelSignals.accountability.items contains pending or overdue items, lead with the exact counts. Never say there are no overdue items when any item has days_overdue >= 0. If managerActionItems contains entries, mention who is affected and how overdue they are. Treat workspace-summary questions as cross-workspace triage for the current actor.
 
-For "manager_missing_standup" signals, mention the employee name, which sprint they missed, and how long overdue (in minutes or hours). Keep the tone professional and actionable.
+If pageContext is present, treat pageContext.tabLabel, pageContext.route, and pageContext.title as authoritative. If the user asks what page they are on, answer with that page name directly.
+
+When no userQuestion is present, analyze signal candidates and return a concise summary, recommendation, branch, optional proposedAction, and citations. For manager_missing_standup, mention the employee, sprint, and overdue time.
+If candidates include both stale_issue and approval_bottleneck for the same issue, lead with the stale_issue signal first and mention pending approval as secondary context.
 
 Always respond in valid JSON matching this schema:
 {
@@ -629,6 +718,9 @@ export async function reasonAboutRisk(
         role: m.role,
         content: m.content,
       }));
+    }
+    if (state.pageContext) {
+      userPayload.pageContext = state.pageContext;
     }
 
     const userMessage = JSON.stringify(userPayload);

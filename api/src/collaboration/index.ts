@@ -9,12 +9,25 @@ import { pool } from '../db/client.js';
 import { extractHypothesisFromContent, extractSuccessCriteriaFromContent, extractVisionFromContent, extractGoalsFromContent } from '../utils/extractHypothesis.js';
 import { yjsToJson, jsonToYjs } from '../utils/yjsConverter.js';
 import { SESSION_TIMEOUT_MS, ABSOLUTE_SESSION_TIMEOUT_MS } from '@ship/shared';
+import type { FleetGraphAlertEvent } from '@ship/shared';
 import cookie from 'cookie';
 
 const messageSync = 0;
 const messageAwareness = 1;
 const messageCustomEvent = 2;
 const messageClearCache = 3; // Tells browser to clear IndexedDB cache before sync
+
+type CollaborationJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | CollaborationJsonValue[]
+  | { [key: string]: CollaborationJsonValue };
+
+type CollaborationEventPayload =
+  | FleetGraphAlertEvent
+  | Record<string, CollaborationJsonValue | undefined>;
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -259,7 +272,7 @@ async function getOrCreateDoc(docName: string): Promise<Y.Doc> {
   }
 
   // Set up persistence and broadcast on changes
-  doc.on('update', (update: Uint8Array, origin: any) => {
+  doc.on('update', (update: Uint8Array, origin?: WebSocket | null) => {
     schedulePersist(docName, doc!);
 
     // Broadcast update to all other clients in this room (except sender)
@@ -583,7 +596,11 @@ export async function handleVisibilityChange(
  * @param eventType - The event type (e.g., 'accountability:updated')
  * @param data - Optional event data payload
  */
-export function broadcastToUser(userId: string, eventType: string, data?: Record<string, unknown>): void {
+export function broadcastToUser(
+  userId: string,
+  eventType: string,
+  data?: CollaborationEventPayload,
+): void {
   const payload = JSON.stringify({ type: eventType, data: data || {} });
 
   // For events connections, send as plain JSON (they're dedicated for events)

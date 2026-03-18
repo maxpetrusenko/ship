@@ -4,6 +4,14 @@ import crypto from 'crypto';
 import { createApp } from '../app.js';
 import { pool } from '../db/client.js';
 
+interface LearningSearchResult {
+  id: string;
+  title: string;
+  category?: string;
+  tags?: string[];
+  source_prd?: string;
+}
+
 describe('Search API', () => {
   const app = createApp('http://localhost:5173');
   // Use unique identifiers to avoid conflicts between concurrent test runs
@@ -143,11 +151,13 @@ describe('Search Learnings API', () => {
   const app = createApp('http://localhost:5173');
   const testRunId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const testEmail = `learning-${testRunId}@ship.local`;
+  const memberEmail = `learning-member-${testRunId}@ship.local`;
   const testWorkspaceName = `Learning Test ${testRunId}`;
 
   let sessionCookie: string;
   let testWorkspaceId: string;
   let testUserId: string;
+  let memberUserId: string;
   let learningDocId: string;
   let regularWikiId: string;
 
@@ -168,11 +178,19 @@ describe('Search Learnings API', () => {
     );
     testUserId = userResult.rows[0].id;
 
+    const memberResult = await pool.query(
+      `INSERT INTO users (email, password_hash, name)
+       VALUES ($1, 'test-hash', 'Learning Member User')
+       RETURNING id`,
+      [memberEmail]
+    );
+    memberUserId = memberResult.rows[0].id;
+
     // Create workspace membership
     await pool.query(
       `INSERT INTO workspace_memberships (workspace_id, user_id, role)
-       VALUES ($1, $2, 'member')`,
-      [testWorkspaceId, testUserId]
+       VALUES ($1, $2, 'member'), ($1, $3, 'member')`,
+      [testWorkspaceId, testUserId, memberUserId]
     );
 
     // Create session
@@ -205,9 +223,9 @@ describe('Search Learnings API', () => {
 
   afterAll(async () => {
     await pool.query('DELETE FROM documents WHERE id IN ($1, $2)', [learningDocId, regularWikiId]);
-    await pool.query('DELETE FROM sessions WHERE user_id = $1', [testUserId]);
-    await pool.query('DELETE FROM workspace_memberships WHERE user_id = $1', [testUserId]);
-    await pool.query('DELETE FROM users WHERE id = $1', [testUserId]);
+    await pool.query('DELETE FROM sessions WHERE user_id IN ($1, $2)', [testUserId, memberUserId]);
+    await pool.query('DELETE FROM workspace_memberships WHERE user_id IN ($1, $2)', [testUserId, memberUserId]);
+    await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [testUserId, memberUserId]);
     await pool.query('DELETE FROM workspaces WHERE id = $1', [testWorkspaceId]);
   });
 
@@ -227,7 +245,7 @@ describe('Search Learnings API', () => {
     expect(Array.isArray(res.body.learnings)).toBe(true);
 
     // Should find our learning document
-    const learning = res.body.learnings.find((l: any) => l.id === learningDocId);
+    const learning = (res.body.learnings as LearningSearchResult[]).find((item) => item.id === learningDocId);
     expect(learning).toBeDefined();
     expect(learning.title).toBe('Learning: API Token Authentication');
   });
@@ -248,7 +266,7 @@ describe('Search Learnings API', () => {
       .set('Cookie', sessionCookie);
 
     expect(res.status).toBe(200);
-    const learning = res.body.learnings.find((l: any) => l.id === learningDocId);
+    const learning = (res.body.learnings as LearningSearchResult[]).find((item) => item.id === learningDocId);
     expect(learning).toBeDefined();
     expect(learning.tags).toContain('security');
     expect(learning.source_prd).toBe('test-prd');
@@ -261,7 +279,7 @@ describe('Search Learnings API', () => {
 
     expect(res.status).toBe(200);
     // Regular wiki doc should not appear
-    const regularDoc = res.body.learnings.find((l: any) => l.id === regularWikiId);
+    const regularDoc = (res.body.learnings as LearningSearchResult[]).find((item) => item.id === regularWikiId);
     expect(regularDoc).toBeUndefined();
   });
 
@@ -272,5 +290,41 @@ describe('Search Learnings API', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.learnings.length).toBeLessThanOrEqual(1);
+  });
+
+  it('GET /api/search/learnings hides private program ids from other workspace members', async () => {
+    const programResult = await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+       VALUES ($1, 'program', 'Hidden Learning Program', 'private', $2)
+       RETURNING id`,
+      [testWorkspaceId, memberUserId]
+    );
+    const hiddenProgramId = programResult.rows[0].id;
+
+    const linkedLearningResult = await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by, properties, content)
+       VALUES ($1, 'wiki', 'Learning: Hidden Program Link', 'workspace', $2, $3, '{"type":"doc","content":[]}')
+       RETURNING id`,
+      [testWorkspaceId, testUserId, JSON.stringify({ tags: ['learning'], category: 'security' })]
+    );
+    const linkedLearningId = linkedLearningResult.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO document_associations (document_id, related_id, relationship_type)
+       VALUES ($1, $2, 'program')`,
+      [linkedLearningId, hiddenProgramId]
+    );
+
+    const res = await request(app)
+      .get('/api/search/learnings?q=Hidden Program Link')
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(200);
+    const learning = res.body.learnings.find((item: { id: string }) => item.id === linkedLearningId);
+    expect(learning).toBeDefined();
+    expect(learning.program_id).toBeNull();
+
+    await pool.query('DELETE FROM document_associations WHERE document_id = $1 AND related_id = $2 AND relationship_type = $3', [linkedLearningId, hiddenProgramId, 'program']);
+    await pool.query('DELETE FROM documents WHERE id IN ($1, $2)', [linkedLearningId, hiddenProgramId]);
   });
 });

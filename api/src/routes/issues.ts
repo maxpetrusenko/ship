@@ -259,7 +259,11 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
 
     // Extract issues and batch-fetch associations to avoid N+1 queries
     const issueIds = result.rows.map(row => row.id);
-    const associationsMap = await getBelongsToAssociationsBatch(issueIds);
+    const associationsMap = await getBelongsToAssociationsBatch(issueIds, {
+      workspaceId,
+      userId,
+      isAdmin,
+    });
 
     const issues = result.rows.map(row => {
       const issue = extractIssueFromRow(row);
@@ -434,7 +438,11 @@ router.get('/by-ticket/:number', authMiddleware, async (req: Request, res: Respo
     }
 
     const issue = extractIssueFromRow(row);
-    const belongs_to = await getBelongsToAssociations(row.id);
+    const belongs_to = await getBelongsToAssociations(row.id, {
+      workspaceId,
+      userId,
+      isAdmin,
+    });
     res.json({
       ...issue,
       display_id: `#${issue.ticket_number}`,
@@ -506,7 +514,11 @@ router.get('/:id/children', authMiddleware, async (req: Request, res: Response) 
 
     // Batch-fetch associations to avoid N+1 queries
     const childIds = result.rows.map(row => row.id);
-    const associationsMap = await getBelongsToAssociationsBatch(childIds);
+    const associationsMap = await getBelongsToAssociationsBatch(childIds, {
+      workspaceId,
+      userId,
+      isAdmin,
+    });
 
     const children = result.rows.map(row => {
       const issue = extractIssueFromRow(row);
@@ -581,7 +593,11 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
     }
 
     const issue = extractIssueFromRow(row);
-    const belongs_to = await getBelongsToAssociations(row.id);
+    const belongs_to = await getBelongsToAssociations(row.id, {
+      workspaceId,
+      userId,
+      isAdmin,
+    });
     res.json({
       ...issue,
       display_id: `#${issue.ticket_number}`,
@@ -688,7 +704,12 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
     }
 
     // Get the belongs_to associations with display info
-    const belongsToResult = await getBelongsToAssociations(newIssueId);
+    const createVisibility = await getVisibilityContext(req.userId!, req.workspaceId!);
+    const belongsToResult = await getBelongsToAssociations(newIssueId, {
+      workspaceId: req.workspaceId!,
+      userId: req.userId!,
+      isAdmin: createVisibility.isAdmin,
+    });
 
     const row = result.rows[0];
     const issue = extractIssueFromRow(row);
@@ -871,7 +892,11 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     if (data.belongs_to !== undefined) {
       // Get existing associations for comparison
-      oldBelongsTo = await getBelongsToAssociations(id);
+      oldBelongsTo = await getBelongsToAssociations(id, {
+        workspaceId,
+        userId,
+        isAdmin,
+      });
       newBelongsTo = data.belongs_to;
 
       // Compare to see if associations changed
@@ -1021,7 +1046,11 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     const displayId = `#${row.ticket_number}`;
 
     const issue = extractIssueFromRow(row);
-    const belongsTo = await getBelongsToAssociations(id);
+    const belongsTo = await getBelongsToAssociations(id, {
+      workspaceId,
+      userId,
+      isAdmin,
+    });
 
     // Broadcast accountability update when an action item issue is completed
     if (isClosingIssue && wasNotClosed) {

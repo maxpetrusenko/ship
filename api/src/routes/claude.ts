@@ -15,8 +15,11 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 
 const router = Router();
+
+class ClaudeContextNotFoundError extends Error {}
 
 interface ClaudeContextRequest {
   context_type: 'standup' | 'review' | 'retro';
@@ -80,7 +83,7 @@ router.get('/context', authMiddleware, async (req: Request, res: Response) => {
           res.status(400).json({ error: 'sprint_id is required for standup context' });
           return;
         }
-        context = await getStandupContext(sprint_id, workspaceId);
+        context = await getStandupContext(sprint_id, workspaceId, req.userId!);
         break;
 
       case 'review':
@@ -88,7 +91,7 @@ router.get('/context', authMiddleware, async (req: Request, res: Response) => {
           res.status(400).json({ error: 'sprint_id is required for review context' });
           return;
         }
-        context = await getReviewContext(sprint_id, workspaceId);
+        context = await getReviewContext(sprint_id, workspaceId, req.userId!);
         break;
 
       case 'retro':
@@ -96,7 +99,7 @@ router.get('/context', authMiddleware, async (req: Request, res: Response) => {
           res.status(400).json({ error: 'project_id is required for retro context' });
           return;
         }
-        context = await getRetroContext(project_id, workspaceId);
+        context = await getRetroContext(project_id, workspaceId, req.userId!);
         break;
 
       default:
@@ -106,6 +109,10 @@ router.get('/context', authMiddleware, async (req: Request, res: Response) => {
 
     res.json(context);
   } catch (error) {
+    if (error instanceof ClaudeContextNotFoundError) {
+      res.status(404).json({ error: 'Context not found' });
+      return;
+    }
     console.error('Error fetching Claude context:', error);
     res.status(500).json({ error: 'Failed to fetch context' });
   }
@@ -114,7 +121,9 @@ router.get('/context', authMiddleware, async (req: Request, res: Response) => {
 /**
  * Get comprehensive context for standup entry
  */
-async function getStandupContext(sprintId: string, workspaceId: string) {
+async function getStandupContext(sprintId: string, workspaceId: string, userId: string) {
+  const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
   // Get sprint with program and project info via junction table
   const sprintResult = await pool.query(`
     SELECT
@@ -123,7 +132,7 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
       s.properties->>'sprint_number' as sprint_number,
       s.properties->>'status' as sprint_status,
       s.properties->>'plan' as sprint_plan,
-      da_prog.related_id as program_id,
+      p.id as program_id,
       p.title as program_name,
       p.content as program_content,
       p.properties->>'description' as program_description,
@@ -137,16 +146,31 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
       proj.properties->>'monetary_impact' as monetary_impact_expected
     FROM documents s
     LEFT JOIN document_associations da_proj ON da_proj.document_id = s.id AND da_proj.relationship_type = 'project'
-    LEFT JOIN documents proj ON da_proj.related_id = proj.id AND proj.document_type = 'project'
+    LEFT JOIN documents proj
+      ON da_proj.related_id = proj.id
+     AND proj.document_type = 'project'
+     AND proj.workspace_id = $2
+     AND proj.archived_at IS NULL
+     AND proj.deleted_at IS NULL
+     AND ${VISIBILITY_FILTER_SQL('proj', '$3', '$4')}
     LEFT JOIN document_associations da_prog ON da_prog.document_id = proj.id AND da_prog.relationship_type = 'program'
-    LEFT JOIN documents p ON da_prog.related_id = p.id AND p.document_type = 'program'
+    LEFT JOIN documents p
+      ON da_prog.related_id = p.id
+     AND p.document_type = 'program'
+     AND p.workspace_id = $2
+     AND p.archived_at IS NULL
+     AND p.deleted_at IS NULL
+     AND ${VISIBILITY_FILTER_SQL('p', '$3', '$4')}
     WHERE s.id = $1
       AND s.document_type = 'sprint'
       AND s.workspace_id = $2
-  `, [sprintId, workspaceId]);
+      AND s.archived_at IS NULL
+      AND s.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('s', '$3', '$4')}
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   if (sprintResult.rows.length === 0) {
-    throw new Error('Week not found');
+    throw new ClaudeContextNotFoundError('Week not found');
   }
 
   const sprint = sprintResult.rows[0];
@@ -166,9 +190,12 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
     LEFT JOIN users u ON (d.properties->>'author_id')::uuid = u.id
     WHERE d.document_type = 'standup'
       AND d.workspace_id = $2
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
     ORDER BY d.created_at DESC
     LIMIT 5
-  `, [sprintId, workspaceId]);
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   // Get issues assigned to this sprint via junction table
   const issuesResult = await pool.query(`
@@ -182,6 +209,9 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
     WHERE d.document_type = 'issue'
       AND d.workspace_id = $2
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
     ORDER BY
       CASE (d.properties->>'priority')
         WHEN 'high' THEN 1
@@ -189,7 +219,7 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
         WHEN 'low' THEN 3
         ELSE 4
       END
-  `, [sprintId, workspaceId]);
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   // Calculate issue stats
   const issueStats = {
@@ -243,7 +273,9 @@ async function getStandupContext(sprintId: string, workspaceId: string) {
 /**
  * Get comprehensive context for sprint review
  */
-async function getReviewContext(sprintId: string, workspaceId: string) {
+async function getReviewContext(sprintId: string, workspaceId: string, userId: string) {
+  const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
   // Get sprint with program and project info via junction table
   const sprintResult = await pool.query(`
     SELECT
@@ -252,7 +284,7 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
       s.properties->>'sprint_number' as sprint_number,
       s.properties->>'status' as sprint_status,
       s.properties->>'plan' as sprint_plan,
-      da_prog.related_id as program_id,
+      p.id as program_id,
       p.title as program_name,
       p.content as program_content,
       p.properties->>'description' as program_description,
@@ -266,16 +298,31 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
       proj.properties->>'monetary_impact' as monetary_impact_expected
     FROM documents s
     LEFT JOIN document_associations da_proj ON da_proj.document_id = s.id AND da_proj.relationship_type = 'project'
-    LEFT JOIN documents proj ON da_proj.related_id = proj.id AND proj.document_type = 'project'
+    LEFT JOIN documents proj
+      ON da_proj.related_id = proj.id
+     AND proj.document_type = 'project'
+     AND proj.workspace_id = $2
+     AND proj.archived_at IS NULL
+     AND proj.deleted_at IS NULL
+     AND ${VISIBILITY_FILTER_SQL('proj', '$3', '$4')}
     LEFT JOIN document_associations da_prog ON da_prog.document_id = proj.id AND da_prog.relationship_type = 'program'
-    LEFT JOIN documents p ON da_prog.related_id = p.id AND p.document_type = 'program'
+    LEFT JOIN documents p
+      ON da_prog.related_id = p.id
+     AND p.document_type = 'program'
+     AND p.workspace_id = $2
+     AND p.archived_at IS NULL
+     AND p.deleted_at IS NULL
+     AND ${VISIBILITY_FILTER_SQL('p', '$3', '$4')}
     WHERE s.id = $1
       AND s.document_type = 'sprint'
       AND s.workspace_id = $2
-  `, [sprintId, workspaceId]);
+      AND s.archived_at IS NULL
+      AND s.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('s', '$3', '$4')}
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   if (sprintResult.rows.length === 0) {
-    throw new Error('Week not found');
+    throw new ClaudeContextNotFoundError('Week not found');
   }
 
   const sprint = sprintResult.rows[0];
@@ -295,8 +342,11 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
     LEFT JOIN users u ON (d.properties->>'author_id')::uuid = u.id
     WHERE d.document_type = 'standup'
       AND d.workspace_id = $2
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
     ORDER BY d.created_at DESC
-  `, [sprintId, workspaceId]);
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   // Get issues with scope change tracking via junction table
   const issuesResult = await pool.query(`
@@ -311,7 +361,10 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
     WHERE d.document_type = 'issue'
       AND d.workspace_id = $2
-  `, [sprintId, workspaceId]);
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   // Calculate detailed issue stats
   const issueStats = {
@@ -334,8 +387,11 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'sprint'
     WHERE d.document_type = 'weekly_review'
       AND d.workspace_id = $2
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
     LIMIT 1
-  `, [sprintId, workspaceId]);
+  `, [sprintId, workspaceId, userId, isAdmin]);
 
   const existingReview = reviewResult.rows[0] || null;
 
@@ -385,7 +441,9 @@ async function getReviewContext(sprintId: string, workspaceId: string) {
 /**
  * Get comprehensive context for project retrospective
  */
-async function getRetroContext(projectId: string, workspaceId: string) {
+async function getRetroContext(projectId: string, workspaceId: string, userId: string) {
+  const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
   // Get project with program info via junction table
   const projectResult = await pool.query(`
     SELECT
@@ -398,20 +456,29 @@ async function getRetroContext(projectId: string, workspaceId: string) {
       proj.properties->>'monetary_impact' as monetary_impact_expected,
       proj.properties->>'status' as project_status,
       proj.created_at as project_created_at,
-      da_prog.related_id as program_id,
+      p.id as program_id,
       p.title as program_name,
       p.properties->>'description' as program_description,
       p.properties->>'goals' as program_goals
     FROM documents proj
     LEFT JOIN document_associations da_prog ON da_prog.document_id = proj.id AND da_prog.relationship_type = 'program'
-    LEFT JOIN documents p ON da_prog.related_id = p.id AND p.document_type = 'program'
+    LEFT JOIN documents p
+      ON da_prog.related_id = p.id
+     AND p.document_type = 'program'
+     AND p.workspace_id = $2
+     AND p.archived_at IS NULL
+     AND p.deleted_at IS NULL
+     AND ${VISIBILITY_FILTER_SQL('p', '$3', '$4')}
     WHERE proj.id = $1
       AND proj.document_type = 'project'
       AND proj.workspace_id = $2
-  `, [projectId, workspaceId]);
+      AND proj.archived_at IS NULL
+      AND proj.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('proj', '$3', '$4')}
+  `, [projectId, workspaceId, userId, isAdmin]);
 
   if (projectResult.rows.length === 0) {
-    throw new Error('Project not found');
+    throw new ClaudeContextNotFoundError('Project not found');
   }
 
   const project = projectResult.rows[0];
@@ -422,15 +489,18 @@ async function getRetroContext(projectId: string, workspaceId: string) {
     SELECT
       d.id,
       d.title,
-      d.sprint_number,
+      d.properties->>'sprint_number' as sprint_number,
       d.properties->>'status' as status,
       d.properties->>'plan' as plan
     FROM documents d
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'project'
     WHERE d.document_type = 'sprint'
       AND d.workspace_id = $2
-    ORDER BY d.sprint_number
-  `, [projectId, workspaceId]);
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+    ORDER BY NULLIF(d.properties->>'sprint_number', '')::int NULLS LAST
+  `, [projectId, workspaceId, userId, isAdmin]);
 
   // Get all sprint reviews for this project's sprints via junction table
   const sprintIds = sprintsResult.rows.map(s => s.id);
@@ -447,7 +517,10 @@ async function getRetroContext(projectId: string, workspaceId: string) {
       WHERE da.related_id = ANY($1)
         AND d.document_type = 'weekly_review'
         AND d.workspace_id = $2
-    `, [sprintIds, workspaceId]);
+        AND d.archived_at IS NULL
+        AND d.deleted_at IS NULL
+        AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+    `, [sprintIds, workspaceId, userId, isAdmin]);
     reviewsData = reviewsResult.rows;
   }
 
@@ -466,9 +539,12 @@ async function getRetroContext(projectId: string, workspaceId: string) {
       WHERE da.related_id = ANY($1)
         AND d.document_type = 'standup'
         AND d.workspace_id = $2
+        AND d.archived_at IS NULL
+        AND d.deleted_at IS NULL
+        AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
       ORDER BY d.created_at DESC
       LIMIT 20
-    `, [sprintIds, workspaceId]);
+    `, [sprintIds, workspaceId, userId, isAdmin]);
     standupsData = standupsResult.rows;
   }
 
@@ -483,7 +559,10 @@ async function getRetroContext(projectId: string, workspaceId: string) {
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'project'
     WHERE d.document_type = 'issue'
       AND d.workspace_id = $2
-  `, [projectId, workspaceId]);
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+  `, [projectId, workspaceId, userId, isAdmin]);
 
   // Calculate project-level stats
   const issueStats = {
@@ -504,10 +583,13 @@ async function getRetroContext(projectId: string, workspaceId: string) {
       d.properties->>'key_learnings' as key_learnings
     FROM documents d
     JOIN document_associations da ON da.document_id = d.id AND da.related_id = $1 AND da.relationship_type = 'project'
-    WHERE d.document_type = 'project_retro'
+    WHERE d.document_type = 'weekly_retro'
       AND d.workspace_id = $2
+      AND d.archived_at IS NULL
+      AND d.deleted_at IS NULL
+      AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
     LIMIT 1
-  `, [projectId, workspaceId]);
+  `, [projectId, workspaceId, userId, isAdmin]);
 
   const existingRetro = retroResult.rows[0] || null;
 

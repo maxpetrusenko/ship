@@ -281,6 +281,231 @@ describe('Document Visibility', () => {
     });
   });
 
+  describe('Association visibility', () => {
+    it('hides private linked documents from belongs_to for other workspace members', async () => {
+      const visibleDocResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'wiki', 'Visible Doc', 'workspace', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const visibleDocId = visibleDocResult.rows[0].id;
+
+      const privateProjectResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'project', 'Private Project', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateProjectId = privateProjectResult.rows[0].id;
+
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'project')`,
+        [visibleDocId, privateProjectId]
+      );
+
+      const memberRes = await request(app)
+        .get(`/api/documents/${visibleDocId}`)
+        .set('Cookie', user2SessionCookie);
+
+      expect(memberRes.status).toBe(200);
+      expect(memberRes.body.belongs_to).toEqual([]);
+
+      const adminRes = await request(app)
+        .get(`/api/documents/${visibleDocId}`)
+        .set('Cookie', adminSessionCookie);
+
+      expect(adminRes.status).toBe(200);
+      expect(adminRes.body.belongs_to).toEqual([
+        expect.objectContaining({
+          id: privateProjectId,
+          type: 'project',
+          title: 'Private Project',
+        }),
+      ]);
+    });
+
+    it('hides private related documents from associations list for other workspace members', async () => {
+      const visibleDocResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'wiki', 'Visible Doc', 'workspace', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const visibleDocId = visibleDocResult.rows[0].id;
+
+      const privateSprintResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'sprint', 'Private Sprint', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateSprintId = privateSprintResult.rows[0].id;
+
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'sprint')`,
+        [visibleDocId, privateSprintId]
+      );
+
+      const memberRes = await request(app)
+        .get(`/api/documents/${visibleDocId}/associations`)
+        .set('Cookie', user2SessionCookie);
+
+      expect(memberRes.status).toBe(200);
+      expect(memberRes.body).toEqual([]);
+
+      const ownerRes = await request(app)
+        .get(`/api/documents/${visibleDocId}/associations`)
+        .set('Cookie', user1SessionCookie);
+
+      expect(ownerRes.status).toBe(200);
+      expect(ownerRes.body).toEqual([
+        expect.objectContaining({
+          related_id: privateSprintId,
+          relationship_type: 'sprint',
+          related_title: 'Private Sprint',
+        }),
+      ]);
+    });
+
+    it('hides private source documents from reverse associations for other workspace members', async () => {
+      const visibleTargetResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'wiki', 'Visible Target', 'workspace', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const visibleTargetId = visibleTargetResult.rows[0].id;
+
+      const privateSourceResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'issue', 'Private Source', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateSourceId = privateSourceResult.rows[0].id;
+
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'parent')`,
+        [privateSourceId, visibleTargetId]
+      );
+
+      const memberRes = await request(app)
+        .get(`/api/documents/${visibleTargetId}/reverse-associations`)
+        .set('Cookie', user2SessionCookie);
+
+      expect(memberRes.status).toBe(200);
+      expect(memberRes.body).toEqual([]);
+
+      const ownerRes = await request(app)
+        .get(`/api/documents/${visibleTargetId}/reverse-associations`)
+        .set('Cookie', user1SessionCookie);
+
+      expect(ownerRes.status).toBe(200);
+      expect(ownerRes.body).toEqual([
+        expect.objectContaining({
+          document_id: privateSourceId,
+          relationship_type: 'parent',
+          document_title: 'Private Source',
+        }),
+      ]);
+    });
+
+    it('hides private documents from document context trees for other workspace members', async () => {
+      const visibleCurrentResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'issue', 'Visible Current', 'workspace', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const visibleCurrentId = visibleCurrentResult.rows[0].id;
+
+      const privateProgramResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'program', 'Private Program', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateProgramId = privateProgramResult.rows[0].id;
+
+      const privateParentResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'issue', 'Private Parent', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateParentId = privateParentResult.rows[0].id;
+
+      const privateChildResult = await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+         VALUES ($1, 'issue', 'Private Child', 'private', $2)
+         RETURNING id`,
+        [testWorkspaceId, user1Id]
+      );
+      const privateChildId = privateChildResult.rows[0].id;
+
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'program')`,
+        [visibleCurrentId, privateProgramId]
+      );
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'parent')`,
+        [visibleCurrentId, privateParentId]
+      );
+      await pool.query(
+        `INSERT INTO document_associations (document_id, related_id, relationship_type)
+         VALUES ($1, $2, 'parent')`,
+        [privateChildId, visibleCurrentId]
+      );
+
+      const memberRes = await request(app)
+        .get(`/api/documents/${visibleCurrentId}/context`)
+        .set('Cookie', user2SessionCookie);
+
+      expect(memberRes.status).toBe(200);
+      expect(memberRes.body.belongs_to).toEqual([]);
+      expect(memberRes.body.ancestors).toEqual([]);
+      expect(memberRes.body.children).toEqual([]);
+      expect(memberRes.body.breadcrumbs).toEqual([
+        expect.objectContaining({
+          id: visibleCurrentId,
+          title: 'Visible Current',
+          type: 'issue',
+        }),
+      ]);
+
+      const ownerRes = await request(app)
+        .get(`/api/documents/${visibleCurrentId}/context`)
+        .set('Cookie', user1SessionCookie);
+
+      expect(ownerRes.status).toBe(200);
+      expect(ownerRes.body.belongs_to).toEqual([
+        expect.objectContaining({
+          id: privateProgramId,
+          type: 'program',
+          title: 'Private Program',
+        }),
+      ]);
+      expect(ownerRes.body.ancestors).toEqual([
+        expect.objectContaining({
+          id: privateParentId,
+          title: 'Private Parent',
+        }),
+      ]);
+      expect(ownerRes.body.children).toEqual([
+        expect.objectContaining({
+          id: privateChildId,
+          title: 'Private Child',
+        }),
+      ]);
+    });
+  });
+
   describe('Creating documents', () => {
     it('creates document with workspace visibility by default', async () => {
       const res = await request(app)

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
+import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -19,12 +20,12 @@ async function canAccessDocument(
   userId: string,
   workspaceId: string
 ): Promise<boolean> {
+  const { isAdmin } = await getVisibilityContext(userId, workspaceId);
   const result = await pool.query(
-    `SELECT id FROM documents
+    `SELECT d.id FROM documents d
      WHERE id = $1 AND workspace_id = $2
-       AND (visibility = 'workspace' OR created_by = $3 OR
-            (SELECT role FROM workspace_memberships WHERE workspace_id = $2 AND user_id = $3) = 'admin')`,
-    [docId, workspaceId, userId]
+       AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
+    [docId, workspaceId, userId, isAdmin]
   );
   return result.rows.length > 0;
 }
@@ -51,6 +52,8 @@ router.get('/:id/associations', authMiddleware, async (req: Request, res: Respon
       return res.status(404).json({ error: 'Document not found' });
     }
 
+    const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
     let query = `
       SELECT
         da.id,
@@ -62,17 +65,20 @@ router.get('/:id/associations', authMiddleware, async (req: Request, res: Respon
         d.title as related_title,
         d.document_type as related_document_type
       FROM document_associations da
-      JOIN documents d ON d.id = da.related_id
+      JOIN documents d
+        ON d.id = da.related_id
+       AND d.workspace_id = $2
+       AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
       WHERE da.document_id = $1
     `;
-    const params: string[] = [id];
+    const params: Array<string | boolean> = [id, workspaceId, userId, isAdmin];
 
     // Filter by relationship type if provided
     if (typeParam) {
       if (!isValidRelationshipType(typeParam)) {
         return res.status(400).json({ error: 'Invalid relationship type' });
       }
-      query += ` AND da.relationship_type = $2`;
+      query += ` AND da.relationship_type = $5`;
       params.push(typeParam);
     }
 
@@ -108,11 +114,7 @@ router.post('/:id/associations', authMiddleware, async (req: Request, res: Respo
     }
 
     // Check related document exists in same workspace
-    const relatedDoc = await pool.query(
-      'SELECT id FROM documents WHERE id = $1 AND workspace_id = $2',
-      [related_id, workspaceId]
-    );
-    if (relatedDoc.rows.length === 0) {
+    if (!(await canAccessDocument(related_id, userId, workspaceId))) {
       return res.status(400).json({ error: 'Related document not found' });
     }
 
@@ -196,6 +198,8 @@ router.get('/:id/reverse-associations', authMiddleware, async (req: Request, res
       return res.status(404).json({ error: 'Document not found' });
     }
 
+    const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
     let query = `
       SELECT
         da.id,
@@ -207,18 +211,20 @@ router.get('/:id/reverse-associations', authMiddleware, async (req: Request, res
         d.title as document_title,
         d.document_type as document_document_type
       FROM document_associations da
-      JOIN documents d ON d.id = da.document_id
+      JOIN documents d
+        ON d.id = da.document_id
+       AND d.workspace_id = $2
+       AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
       WHERE da.related_id = $1
-        AND d.workspace_id = $2
         AND d.archived_at IS NULL
     `;
-    const params: string[] = [id, workspaceId];
+    const params: Array<string | boolean> = [id, workspaceId, userId, isAdmin];
 
     if (typeParam) {
       if (!isValidRelationshipType(typeParam)) {
         return res.status(400).json({ error: 'Invalid relationship type' });
       }
-      query += ` AND da.relationship_type = $3`;
+      query += ` AND da.relationship_type = $5`;
       params.push(typeParam);
     }
 
@@ -245,18 +251,28 @@ router.get('/:id/context', authMiddleware, async (req: Request, res: Response) =
       return res.status(404).json({ error: 'Document not found' });
     }
 
+    const { isAdmin } = await getVisibilityContext(userId, workspaceId);
+
     // Get the current document
     // Programs are stored as documents with document_type = 'program', not a separate table
     const currentDoc = await pool.query(
       `SELECT d.id, d.title, d.document_type, d.ticket_number,
-              prog_da.related_id as program_id,
+              prog.id as program_id,
               prog.title as program_name,
               prog.properties->>'color' as program_color
        FROM documents d
        LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
-       LEFT JOIN documents prog ON prog_da.related_id = prog.id AND prog.document_type = 'program'
-       WHERE d.id = $1`,
-      [id]
+       LEFT JOIN documents prog
+         ON prog_da.related_id = prog.id
+        AND prog.document_type = 'program'
+        AND prog.workspace_id = $2
+        AND prog.archived_at IS NULL
+        AND ${VISIBILITY_FILTER_SQL('prog', '$3', '$4')}
+       WHERE d.id = $1
+         AND d.workspace_id = $2
+         AND d.archived_at IS NULL
+         AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}`,
+      [id, workspaceId, userId, isAdmin]
     );
 
     if (currentDoc.rows.length === 0) {
@@ -279,6 +295,7 @@ router.get('/:id/context', authMiddleware, async (req: Request, res: Response) =
           AND da.relationship_type = 'parent'
           AND d.workspace_id = $2
           AND d.archived_at IS NULL
+          AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
 
         UNION ALL
 
@@ -295,9 +312,10 @@ router.get('/:id/context', authMiddleware, async (req: Request, res: Response) =
         WHERE da.relationship_type = 'parent'
           AND d.workspace_id = $2
           AND d.archived_at IS NULL
+          AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
       )
       SELECT * FROM ancestors ORDER BY depth DESC`,
-      [id, workspaceId]
+      [id, workspaceId, userId, isAdmin]
     );
 
     // Get children (documents that have this document as parent)
@@ -307,16 +325,23 @@ router.get('/:id/context', authMiddleware, async (req: Request, res: Response) =
         d.title,
         d.document_type,
         d.ticket_number,
-        (SELECT COUNT(*) FROM document_associations da2
-         WHERE da2.related_id = d.id AND da2.relationship_type = 'parent') as child_count
+        (SELECT COUNT(*)
+         FROM document_associations da2
+         JOIN documents child_docs ON child_docs.id = da2.document_id
+         WHERE da2.related_id = d.id
+           AND da2.relationship_type = 'parent'
+           AND child_docs.workspace_id = $2
+           AND child_docs.archived_at IS NULL
+           AND ${VISIBILITY_FILTER_SQL('child_docs', '$3', '$4')}) as child_count
        FROM documents d
        JOIN document_associations da ON da.document_id = d.id
        WHERE da.related_id = $1
          AND da.relationship_type = 'parent'
          AND d.workspace_id = $2
          AND d.archived_at IS NULL
+         AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
        ORDER BY d.title`,
-      [id, workspaceId]
+      [id, workspaceId, userId, isAdmin]
     );
 
     // Get belongs_to associations (project, sprint, program)
@@ -334,13 +359,14 @@ router.get('/:id/context', authMiddleware, async (req: Request, res: Response) =
          AND da.relationship_type IN ('project', 'sprint', 'program')
          AND d.workspace_id = $2
          AND d.archived_at IS NULL
+         AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
        ORDER BY
          CASE da.relationship_type
            WHEN 'program' THEN 1
            WHEN 'project' THEN 2
            WHEN 'sprint' THEN 3
          END`,
-      [id, workspaceId]
+      [id, workspaceId, userId, isAdmin]
     );
 
     // Build breadcrumb path: Program > Project > Sprint > Parent Issues > Current

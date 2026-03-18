@@ -18,9 +18,11 @@ import {
   getScheduler,
   updateApprovalStatus,
   getPendingApprovals,
+  upsertAlert,
   invokeGraph,
   resumeGraph,
   isEntityAnalysisStale,
+  buildQueueFingerprint,
   getActiveThread,
   getThreadById,
   createThread,
@@ -28,7 +30,17 @@ import {
   appendChatMessage,
   loadRecentMessages,
   updateThreadPageContext,
+  getUserAlerts,
+  getUnreadCount,
+  markRecipientsRead,
+  dismissRecipient,
+  snoozeRecipient,
 } from '../fleetgraph/runtime/index.js';
+import { runFleetGraphChat } from '../fleetgraph/chat/runtime.js';
+import type {
+  FleetGraphChatRuntimeResult,
+  FleetGraphChatToolCallRecord,
+} from '../fleetgraph/chat/types.js';
 import type {
   FleetGraphOnDemandRequest,
   FleetGraphOnDemandResponse,
@@ -44,6 +56,7 @@ import type {
   FleetGraphCreateChatThreadResponse,
   FleetGraphPageViewResponse,
   FleetGraphEntityType,
+  FleetGraphAlert,
   HumanGateOutcome,
 } from '@ship/shared';
 import { isFleetGraphReady } from '../fleetgraph/bootstrap.js';
@@ -82,6 +95,7 @@ router.post('/on-demand', async (req: Request, res: Response) => {
       actorUserId: userId,
       entityType: body.entityType,
       entityId: body.entityId,
+      pageContext: null,
       coreContext: {},
       parallelSignals: {},
       candidates: [],
@@ -130,29 +144,110 @@ router.post('/on-demand', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------------------
-// POST /api/fleetgraph/chat (DB-backed persistent threads)
+// POST /api/fleetgraph/chat (DB-backed persistent threads, graph parity)
 // -------------------------------------------------------------------------
 
-function buildChatDebugInfo(state: FleetGraphRunState): FleetGraphChatDebugInfo {
-  const signals = state.parallelSignals as Record<string, unknown>;
-  const accountability = (signals.accountability as Record<string, unknown> | undefined)?.items;
-  const managerActionItems = signals.managerActionItems;
-  const accountabilityItems = Array.isArray(accountability)
-    ? accountability as Array<{ days_overdue?: number }>
-    : [];
+function buildChatDebugInfoFromGraph(
+  state: FleetGraphRunState,
+  entityType: FleetGraphChatDebugInfo['entityType'],
+  entityId: FleetGraphChatDebugInfo['entityId'],
+): FleetGraphChatDebugInfo {
+  const signals = state.parallelSignals as Record<string, unknown> | null;
+  const candidates = (state.candidates ?? []) as Array<{ signalType?: string }>;
+  const candidateSignals = candidates
+    .map((c) => c.signalType)
+    .filter((s): s is FleetGraphChatDebugInfo['candidateSignals'][number] => !!s);
+  const accountability = signals?.accountability as Record<string, unknown> | undefined;
+  const managerItems = signals?.managerActionItems;
+  return {
+    traceUrl: state.traceUrl ?? null,
+    branch: state.assessment?.branch ?? state.branch,
+    entityType,
+    entityId,
+    candidateSignals,
+    accountability: {
+      total: typeof accountability?.total === 'number' ? accountability.total : 0,
+      overdue: typeof accountability?.overdue === 'number' ? accountability.overdue : 0,
+      dueToday: typeof accountability?.dueToday === 'number' ? accountability.dueToday : 0,
+    },
+    managerActionItems: Array.isArray(managerItems) ? managerItems.length : 0,
+  };
+}
+
+function buildChatDebugInfoFromRuntime(
+  result: FleetGraphChatRuntimeResult,
+  entityType: FleetGraphChatDebugInfo['entityType'],
+  entityId: FleetGraphChatDebugInfo['entityId'],
+): FleetGraphChatDebugInfo {
+  let accountability: FleetGraphChatDebugInfo['accountability'] = {
+    total: 0,
+    overdue: 0,
+    dueToday: 0,
+  };
+  let managerActionItems = 0;
+
+  for (const toolCall of result.toolCalls) {
+    if (toolCall.name !== 'fetch_workspace_signals') {
+      continue;
+    }
+
+    const output = toolCall.result;
+    const outputAccountability = output.accountability as Record<string, unknown> | undefined;
+    const outputManagerItems = output.managerActionItems;
+    accountability = {
+      total: typeof outputAccountability?.total === 'number' ? outputAccountability.total : 0,
+      overdue: typeof outputAccountability?.overdue === 'number' ? outputAccountability.overdue : 0,
+      dueToday: typeof outputAccountability?.dueToday === 'number' ? outputAccountability.dueToday : 0,
+    };
+    managerActionItems = Array.isArray(outputManagerItems) ? outputManagerItems.length : 0;
+  }
 
   return {
-    traceUrl: state.traceUrl,
-    branch: state.branch,
-    entityType: state.entityType,
-    entityId: state.entityId,
-    candidateSignals: state.candidates.map((candidate) => candidate.signalType),
-    accountability: {
-      total: accountabilityItems.length,
-      overdue: accountabilityItems.filter((item) => typeof item.days_overdue === 'number' && item.days_overdue > 0).length,
-      dueToday: accountabilityItems.filter((item) => item.days_overdue === 0).length,
-    },
-    managerActionItems: Array.isArray(managerActionItems) ? managerActionItems.length : 0,
+    traceUrl: result.traceUrl ?? null,
+    branch: result.assessment.branch,
+    entityType,
+    entityId,
+    toolCalls: result.toolCalls.map((toolCall) => ({
+      name: toolCall.name,
+      arguments: toolCall.arguments,
+    })),
+    candidateSignals: [],
+    accountability,
+    managerActionItems,
+  };
+}
+
+function resolveAssistantAlertId(
+  assessment: FleetGraphChatRuntimeResult['assessment'],
+  alerts: FleetGraphAlert[],
+): string | undefined {
+  if (!assessment.proposedAction) {
+    return undefined;
+  }
+
+  const matchingAlerts = alerts.filter((alert) =>
+    alert.status === 'active'
+    && alert.signalType === 'chat_suggestion'
+    && alert.summary === assessment.summary
+    && alert.recommendation === assessment.recommendation,
+  );
+
+  if (matchingAlerts.length === 1) {
+    return matchingAlerts[0]?.id;
+  }
+
+  return undefined;
+}
+
+function normalizeRuntimeAssessment(
+  assessment: FleetGraphChatRuntimeResult['assessment'],
+): NonNullable<FleetGraphChatMessage['assessment']> {
+  return {
+    summary: assessment.summary,
+    recommendation: assessment.recommendation,
+    branch: assessment.branch,
+    citations: assessment.citations,
+    ...(assessment.proposedAction ? { proposedAction: assessment.proposedAction } : {}),
   };
 }
 
@@ -164,8 +259,10 @@ router.get('/chat/thread', async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
+    const entityType = req.query.entityType as FleetGraphEntityType | undefined;
+    const entityId = req.query.entityId as string | undefined;
 
-    const thread = await getActiveThread(pool, workspaceId, userId);
+    const thread = await getActiveThread(pool, workspaceId, userId, entityType, entityId);
     const messages = thread ? await loadRecentMessages(pool, thread.id) : [];
 
     const response: FleetGraphChatThreadResponse = { thread, messages };
@@ -184,8 +281,9 @@ router.post('/chat/thread', async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
+    const { entityType, entityId } = req.body as { entityType?: FleetGraphEntityType; entityId?: string };
 
-    const thread = await createThread(pool, workspaceId, userId);
+    const thread = await createThread(pool, workspaceId, userId, entityType, entityId);
     const response: FleetGraphCreateChatThreadResponse = { thread };
     return res.json(response);
   } catch (err) {
@@ -212,7 +310,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'entityType, entityId, and question are required' });
     }
 
-    // Resolve thread: explicit threadId > get-or-create active
+    // Resolve thread with entity scope
     let thread;
     if (body.threadId) {
       thread = await getThreadById(pool, body.threadId, workspaceId, userId);
@@ -220,7 +318,7 @@ router.post('/chat', async (req: Request, res: Response) => {
         return res.status(404).json({ error: 'Thread not found or access denied' });
       }
     } else {
-      thread = await getOrCreateActiveThread(pool, workspaceId, userId);
+      thread = await getOrCreateActiveThread(pool, workspaceId, userId, body.entityType, body.entityId);
     }
 
     // Update page context if provided
@@ -233,49 +331,36 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     const runId = crypto.randomUUID();
 
-    // Build initial state with chat question + history threaded in
-    const initialState: FleetGraphRunState = {
-      runId,
-      traceId: runId,
-      mode: 'on_demand',
-      workspaceId,
-      actorUserId: userId,
-      entityType: body.entityType,
-      entityId: body.entityId,
-      coreContext: {},
-      parallelSignals: {},
-      candidates: [],
-      branch: 'clean',
-      assessment: null,
-      gateOutcome: null,
-      snoozeUntil: null,
-      error: null,
-      runStartedAt: Date.now(),
-      tokenUsage: null,
-      chatQuestion: body.question,
-      chatHistory: history,
-      traceUrl: null,
-      trigger: 'on_demand',
-    };
-
-    let finalState: FleetGraphRunState = initialState;
+    let runtimeResult: FleetGraphChatRuntimeResult;
     try {
-      const result = await invokeGraph(initialState);
-      finalState = result.state;
-    } catch (graphErr) {
-      console.error('[FleetGraph] Chat graph invocation failed:', graphErr);
+      runtimeResult = await runFleetGraphChat({
+        workspaceId,
+        userId,
+        threadId: thread.id,
+        entityType: body.entityType,
+        entityId: body.entityId,
+        question: body.question,
+        history: history.map((m) => ({ role: m.role, content: m.content })),
+        pageContext: body.pageContext ?? null,
+      });
+    } catch (chatErr) {
+      console.error('[FleetGraph] Chat graph invocation failed:', chatErr);
+      return res.status(502).json({ error: 'FleetGraph chat runtime failed' });
     }
 
-    // Build assistant message
+    // Fetch alerts for the entity (created during graph run or pre-existing)
+    const alerts = await getAlertsByEntity(pool, body.entityType, body.entityId);
+    const activeAlerts = alerts.filter((a) => a.status === 'active' && a.workspaceId === workspaceId);
+    const assistantAlertId = resolveAssistantAlertId(runtimeResult.assessment, activeAlerts);
+    const debugInfo = buildChatDebugInfoFromRuntime(runtimeResult, body.entityType, body.entityId);
+
     const assistantMessage: FleetGraphChatMessage = {
-      role: 'assistant',
-      content: finalState.assessment?.summary ?? 'Everything looks healthy here. Ask me anything about this entity.',
-      assessment: finalState.assessment ?? undefined,
-      debug: buildChatDebugInfo(finalState),
-      timestamp: new Date().toISOString(),
+      ...runtimeResult.message,
+      alertId: assistantAlertId,
+      assessment: normalizeRuntimeAssessment(runtimeResult.assessment),
+      debug: debugInfo,
     };
 
-    // Persist both messages to DB
     await appendChatMessage(pool, thread.id, 'user', body.question);
     await appendChatMessage(
       pool,
@@ -284,20 +369,19 @@ router.post('/chat', async (req: Request, res: Response) => {
       assistantMessage.content,
       assistantMessage.assessment,
       assistantMessage.debug,
+      assistantMessage.alertId,
+      assistantMessage.debug?.traceUrl,
     );
-
-    const alerts = await getAlertsByEntity(pool, body.entityType, body.entityId);
-    const activeAlerts = alerts.filter((a) => a.status === 'active' && a.workspaceId === workspaceId);
 
     const response: FleetGraphChatResponse = {
       conversationId: thread.id,
       threadId: thread.id,
       runId,
-      branch: finalState.branch,
-      assessment: finalState.assessment,
+      branch: runtimeResult.assessment.branch,
+      assessment: normalizeRuntimeAssessment(runtimeResult.assessment),
       alerts: activeAlerts,
       message: assistantMessage,
-      traceUrl: finalState.traceUrl ?? undefined,
+      traceUrl: runtimeResult.traceUrl ?? undefined,
     };
 
     return res.json(response);
@@ -333,13 +417,23 @@ router.post('/page-view', async (req: Request, res: Response) => {
     }
 
     const queue = scheduler.getQueue();
-    queue.enqueue({
+    const fingerprint = buildQueueFingerprint(workspaceId, entityType, entityId);
+    if (queue.hasPending(fingerprint)) {
+      const response: FleetGraphPageViewResponse = { triggered: false, reason: 'analysis already queued' };
+      return res.json(response);
+    }
+
+    const enqueued = queue.enqueue({
       workspaceId,
       mode: 'on_demand',
       entityType,
       entityId,
       trigger: 'page_view',
     });
+    if (!enqueued) {
+      const response: FleetGraphPageViewResponse = { triggered: false, reason: 'analysis queue unavailable' };
+      return res.json(response);
+    }
 
     console.log(`[FleetGraph] page-view: enqueued ${entityType}:${entityId}`);
 
@@ -359,46 +453,58 @@ router.post('/page-view', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------------------
-// GET /api/fleetgraph/alerts
+// GET /api/fleetgraph/alerts (recipient-based)
 // -------------------------------------------------------------------------
 
 router.get('/alerts', async (req: Request, res: Response) => {
-  // No isFleetGraphReady() gate: alerts are a DB read, not a graph operation.
-  // This allows the endpoint to work even when OPENAI_API_KEY is missing.
   try {
+    const userId = req.userId!;
     const workspaceId = req.workspaceId!;
     const entityType = req.query.entityType as string | undefined;
     const entityId = req.query.entityId as string | undefined;
-    const status = req.query.status as string | undefined;
+    const status = req.query.status as FleetGraphAlert['status'] | undefined;
 
-    let alerts;
+    // Use recipient-based query for the current user
+    let alerts = await getUserAlerts(pool, userId, workspaceId);
 
+    // Optionally filter by entity
     if (entityType && entityId) {
-      alerts = await getAlertsByEntity(pool, entityType, entityId);
-      // Scope to workspace: filter out alerts from other workspaces
-      alerts = alerts.filter((a) => a.workspaceId === workspaceId);
-    } else {
-      alerts = await getActiveAlerts(pool, workspaceId);
+      alerts = alerts.filter((a) => a.entityType === entityType && a.entityId === entityId);
     }
-
-    // Filter by status if provided
     if (status) {
       alerts = alerts.filter((a) => a.status === status);
     }
 
-    // Include pending approvals so the UI can match alerts to real action data
+    const unreadCount = await getUnreadCount(pool, userId, workspaceId);
     const pendingApprovals = await getPendingApprovals(pool, workspaceId);
 
     const response: FleetGraphAlertsResponse = {
       alerts,
       pendingApprovals,
       total: alerts.length,
+      unreadCount,
     };
 
     return res.json(response);
   } catch (err) {
     console.error('[FleetGraph] alerts error:', err);
     return res.status(500).json({ error: 'Failed to fetch alerts' });
+  }
+});
+
+// -------------------------------------------------------------------------
+// POST /api/fleetgraph/alerts/mark-read
+// -------------------------------------------------------------------------
+
+router.post('/alerts/mark-read', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { alertIds } = req.body as { alertIds?: string[] };
+    const count = await markRecipientsRead(pool, userId, alertIds);
+    return res.json({ success: true, markedCount: count });
+  } catch (err) {
+    console.error('[FleetGraph] mark-read error:', err);
+    return res.status(500).json({ error: 'Failed to mark alerts as read' });
   }
 });
 
@@ -489,7 +595,31 @@ router.post('/alerts/:id/resolve', async (req: Request, res: Response) => {
       }
     }
 
-    // Resolve the alert itself
+    // Dismiss/snooze are recipient-level actions (don't change global alert status)
+    if (body.outcome === 'dismiss') {
+      const dismissed = await dismissRecipient(pool, alertId, userId);
+      if (!dismissed) {
+        return res.status(404).json({ error: 'Alert recipient not found' });
+      }
+      return res.json({ success: true });
+    }
+
+    if (body.outcome === 'snooze') {
+      let snoozedUntil: Date;
+      if (body.snoozedUntil) {
+        snoozedUntil = new Date(body.snoozedUntil);
+      } else {
+        const mins = body.snoozeDurationMinutes ?? 60;
+        snoozedUntil = new Date(Date.now() + mins * 60_000);
+      }
+      const snoozed = await snoozeRecipient(pool, alertId, userId, snoozedUntil);
+      if (!snoozed) {
+        return res.status(404).json({ error: 'Alert recipient not found' });
+      }
+      return res.json({ success: true });
+    }
+
+    // approve/reject still use global alert status transition (handled above)
     const resolved = await resolveAlert(
       pool,
       alertId,

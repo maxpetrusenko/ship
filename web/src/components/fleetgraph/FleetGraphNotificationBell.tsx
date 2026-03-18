@@ -11,7 +11,7 @@ import {
   useFleetGraphNotifications,
   useFleetGraphDismissAlert,
   useFleetGraphSnoozeAlert,
-  useFleetGraphDismissAll,
+  useFleetGraphMarkAllRead,
   fleetgraphKeys,
 } from '@/hooks/useFleetGraph';
 import { useRealtimeEvent } from '@/hooks/useRealtimeEvents';
@@ -31,7 +31,7 @@ export default function FleetGraphNotificationBell() {
   const { alerts, unreadCount } = useFleetGraphNotifications();
   const dismissAlert = useFleetGraphDismissAlert();
   const snoozeAlert = useFleetGraphSnoozeAlert();
-  const dismissAll = useFleetGraphDismissAll();
+  const markAllRead = useFleetGraphMarkAllRead();
 
   // Realtime: refetch all alerts when server pushes a new fleetgraph:alert
   const handleAlertEvent = useCallback(() => {
@@ -95,8 +95,8 @@ export default function FleetGraphNotificationBell() {
   );
 
   const handleMarkAllRead = useCallback(() => {
-    dismissAll.mutate();
-  }, [dismissAll]);
+    markAllRead.mutate();
+  }, [markAllRead]);
 
   const handleOpenContext = useCallback(
     (alert: FleetGraphAlert) => {
@@ -172,7 +172,7 @@ export default function FleetGraphNotificationBell() {
           onSnooze={handleSnooze}
           onMarkAllRead={handleMarkAllRead}
           onOpenContext={handleOpenContext}
-          isDismissing={dismissAlert.isPending || dismissAll.isPending}
+          isDismissing={dismissAlert.isPending || markAllRead.isPending}
         />
       )}
     </div>

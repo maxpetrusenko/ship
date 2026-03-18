@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { z } from 'zod';
-import type { StandupRow } from '@ship/shared';
+import type { StandupRow, TipTapDoc } from '@ship/shared';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
@@ -15,6 +15,38 @@ import { extractText } from '../utils/document-content.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
+
+interface WeekReviewIssueProperties {
+  state?: string;
+  carryover_from_sprint_id?: string | null;
+}
+
+interface WeekReviewIssueRow {
+  title: string;
+  ticket_number: number;
+  properties?: WeekReviewIssueProperties | null;
+}
+
+interface WeekReviewSprintData {
+  sprint_number: number;
+  program_name?: string | null;
+  plan?: string | null;
+}
+
+interface WeekGroupIssue {
+  id: string;
+  title: string;
+  state: string;
+  priority: string;
+  assignee_id: string | null;
+  assignee_name: string | null;
+  assignee_archived: boolean;
+  estimate: number | null;
+  ticket_number: number;
+  display_id: string;
+  created_at: string;
+  updated_at: string;
+}
 
 /**
  * Look up the reports_to user_id for a sprint's owner.
@@ -701,7 +733,7 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
     const groupedData: Record<string, {
       sprint: { id: string; name: string; sprint_number: number };
       program: { id: string; name: string; prefix: string } | null;
-      issues: any[];
+      issues: WeekGroupIssue[];
     }> = {};
 
     for (const row of result.rows) {
@@ -746,9 +778,9 @@ router.get('/my-week', authMiddleware, async (req: Request, res: Response) => {
     // Calculate totals
     const totalIssues = groups.reduce((sum, g) => sum + g.issues.length, 0);
     const completedIssues = groups.reduce((sum, g) =>
-      sum + g.issues.filter((i: any) => i.state === 'done').length, 0);
+      sum + g.issues.filter((i) => i.state === 'done').length, 0);
     const inProgressIssues = groups.reduce((sum, g) =>
-      sum + g.issues.filter((i: any) => i.state === 'in_progress' || i.state === 'in_review').length, 0);
+      sum + g.issues.filter((i) => i.state === 'in_progress' || i.state === 'in_review').length, 0);
 
     res.json({
       groups,
@@ -2040,32 +2072,35 @@ const sprintReviewSchema = z.object({
 });
 
 // Helper to generate pre-filled sprint review content
-async function generatePrefilledReviewContent(sprintData: any, issues: any[]) {
+async function generatePrefilledReviewContent(
+  sprintData: WeekReviewSprintData,
+  issues: WeekReviewIssueRow[],
+) {
   // Categorize issues
   const issuesPlanned = issues.filter(i => {
-    const props = i.properties || {};
+    const props = i.properties ?? {};
     // An issue is "planned" if it was in the sprint from the start (no carryover_from_sprint_id)
     return !props.carryover_from_sprint_id;
   });
 
   const issuesCompleted = issues.filter(i => {
-    const props = i.properties || {};
+    const props = i.properties ?? {};
     return props.state === 'done';
   });
 
   const issuesIntroduced = issues.filter(i => {
-    const props = i.properties || {};
+    const props = i.properties ?? {};
     // Issues introduced mid-sprint would have carryover_from_sprint_id
     return !!props.carryover_from_sprint_id;
   });
 
   const issuesCancelled = issues.filter(i => {
-    const props = i.properties || {};
+    const props = i.properties ?? {};
     return props.state === 'cancelled';
   });
 
   // Build TipTap content with suggested sections
-  const content: any = {
+  const content: TipTapDoc = {
     type: 'doc',
     content: [
       {
@@ -2259,13 +2294,16 @@ router.get('/:id/review', authMiddleware, async (req: Request, res: Response) =>
       .map((row: { content: unknown }) => extractText(row.content))
       .filter((t: string) => t.trim().length > 0);
 
-    const sprintData = {
+    const sprintData: WeekReviewSprintData = {
       sprint_number: sprintProps.sprint_number || 1,
       program_name: sprint.program_name,
       plan: planTexts.length > 0 ? planTexts.join('\n\n') : null,
     };
 
-    const prefilledContent = await generatePrefilledReviewContent(sprintData, issuesResult.rows);
+    const prefilledContent = await generatePrefilledReviewContent(
+      sprintData,
+      issuesResult.rows as WeekReviewIssueRow[],
+    );
 
     res.json({
       id: null, // No ID yet - this is a draft

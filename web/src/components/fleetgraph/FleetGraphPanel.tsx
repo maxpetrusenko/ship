@@ -3,7 +3,7 @@
  * Embedded in property sidebars to surface drift alerts, approval gates, and
  * on-demand analysis scoped to the current entity (issue/sprint/project).
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/cn';
 import {
   useFleetGraphAlerts,
@@ -16,7 +16,6 @@ import { useRealtimeEvent } from '@/hooks/useRealtimeEvents';
 import { useQueryClient } from '@tanstack/react-query';
 import { FleetGraphAlertCard } from './FleetGraphAlertCard';
 import { FleetGraphApprovalCard } from './FleetGraphApprovalCard';
-import { FleetGraphChat } from './FleetGraphChat';
 import type {
   FleetGraphPanelProps,
   FleetGraphAlert,
@@ -51,6 +50,11 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
   const { data, isLoading, isError, refetch } = useFleetGraphAlerts(entityType, entityId);
   const onDemand = useFleetGraphOnDemand();
   const resolve = useFleetGraphResolve();
+  const [latestTraceUrl, setLatestTraceUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLatestTraceUrl(null);
+  }, [entityType, entityId, workspaceId]);
 
   // Realtime: invalidate scoped query when server pushes a new alert
   const handleAlertEvent = useCallback(() => {
@@ -70,7 +74,20 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
   );
 
   const handleAnalyze = useCallback(() => {
-    onDemand.mutate({ entityType, entityId, workspaceId });
+    console.log('[FleetGraph] Bolt clicked', { entityType, entityId, workspaceId, isPending: onDemand.isPending });
+    setLatestTraceUrl(null);
+    onDemand.mutate(
+      { entityType, entityId, workspaceId },
+      {
+        onSuccess: (result) => {
+          console.log('[FleetGraph] On-demand success', result);
+          setLatestTraceUrl(result.traceUrl ?? null);
+        },
+        onError: (err) => {
+          console.error('[FleetGraph] On-demand error', err);
+        },
+      },
+    );
   }, [onDemand, entityType, entityId, workspaceId]);
 
   // Partition active alerts into approval vs informational using real approval data
@@ -101,9 +118,30 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <svg className="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={onDemand.isPending}
+            title="Run FleetGraph analysis"
+            aria-label="Run FleetGraph analysis"
+            className={cn(
+              'p-0.5 rounded transition-colors',
+              'hover:bg-accent/20 disabled:opacity-40 disabled:cursor-not-allowed',
+            )}
+          >
+            <svg
+              className={cn(
+                'w-3.5 h-3.5 transition-all',
+                onDemand.isPending
+                  ? 'text-accent fill-accent/40 animate-fg-pulse'
+                  : 'text-accent fill-none',
+              )}
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </button>
           <span className="text-xs font-medium text-foreground">FleetGraph</span>
           {activeAlerts.length > 0 && (
             <span className="text-[10px] font-semibold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full">
@@ -116,17 +154,6 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
             </span>
           )}
         </div>
-        <button
-          onClick={handleAnalyze}
-          disabled={onDemand.isPending}
-          className={cn(
-            'text-[11px] px-2 py-1 rounded font-medium transition-colors',
-            'bg-accent/10 text-accent hover:bg-accent/20',
-            'disabled:opacity-40',
-          )}
-        >
-          {onDemand.isPending ? 'Analyzing...' : 'Analyze'}
-        </button>
       </div>
 
       {/* Loading skeleton */}
@@ -139,6 +166,7 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
             Could not load drift alerts.
           </p>
           <button
+            type="button"
             onClick={() => refetch()}
             className="text-[11px] px-2.5 py-1 rounded font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
           >
@@ -152,6 +180,20 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
         <p className="text-xs text-red-400 px-1">
           Analysis failed. Try again.
         </p>
+      )}
+
+      {latestTraceUrl && (
+        <div className="px-1">
+          <a
+            href={latestTraceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Latest trace"
+            className="text-[10px] text-accent break-all hover:underline"
+          >
+            {latestTraceUrl}
+          </a>
+        </div>
       )}
 
       {/* Approval cards (action required, highlighted) */}
@@ -204,15 +246,6 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
           </p>
         </div>
       )}
-
-      {/* On-demand analysis input */}
-      <div className="border-t border-border pt-3">
-        <FleetGraphChat
-          entityType={entityType}
-          entityId={entityId}
-          workspaceId={workspaceId}
-        />
-      </div>
     </div>
   );
 }

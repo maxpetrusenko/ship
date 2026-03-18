@@ -6,6 +6,7 @@
  */
 
 import { pool } from '../db/client.js';
+import { VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 
 // =============================================================================
 // Types
@@ -19,6 +20,12 @@ export interface BelongsToEntry {
   type: 'program' | 'project' | 'sprint' | 'parent';
   title?: string;
   color?: string;
+}
+
+export interface AssociationVisibilityScope {
+  workspaceId: string;
+  userId: string;
+  isAdmin: boolean;
 }
 
 /**
@@ -114,17 +121,29 @@ export function getTimestampUpdates(
  * // Returns: [{ id: '...', type: 'project', title: 'My Project', color: '#ff0000' }]
  */
 export async function getBelongsToAssociations(
-  documentId: string
+  documentId: string,
+  visibility?: AssociationVisibilityScope,
 ): Promise<BelongsToEntry[]> {
-  const result = await pool.query(
-    `SELECT da.related_id as id, da.relationship_type as type,
-            d.title, d.properties->>'color' as color
-     FROM document_associations da
-     LEFT JOIN documents d ON da.related_id = d.id
-     WHERE da.document_id = $1
-     ORDER BY da.relationship_type, da.created_at`,
-    [documentId]
-  );
+  const query = visibility
+    ? `SELECT da.related_id as id, da.relationship_type as type,
+              d.title, d.properties->>'color' as color
+       FROM document_associations da
+       JOIN documents d
+         ON da.related_id = d.id
+        AND d.workspace_id = $2
+        AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+       WHERE da.document_id = $1
+       ORDER BY da.relationship_type, da.created_at`
+    : `SELECT da.related_id as id, da.relationship_type as type,
+              d.title, d.properties->>'color' as color
+       FROM document_associations da
+       LEFT JOIN documents d ON da.related_id = d.id
+       WHERE da.document_id = $1
+       ORDER BY da.relationship_type, da.created_at`;
+  const params = visibility
+    ? [documentId, visibility.workspaceId, visibility.userId, visibility.isAdmin]
+    : [documentId];
+  const result = await pool.query(query, params);
   return result.rows.map((row) => ({
     id: row.id,
     type: row.type,
@@ -146,21 +165,33 @@ export async function getBelongsToAssociations(
  * }
  */
 export async function getBelongsToAssociationsBatch(
-  documentIds: string[]
+  documentIds: string[],
+  visibility?: AssociationVisibilityScope,
 ): Promise<Map<string, BelongsToEntry[]>> {
   if (documentIds.length === 0) {
     return new Map();
   }
 
-  const result = await pool.query(
-    `SELECT da.document_id, da.related_id as id, da.relationship_type as type,
-            d.title, d.properties->>'color' as color
-     FROM document_associations da
-     LEFT JOIN documents d ON da.related_id = d.id
-     WHERE da.document_id = ANY($1)
-     ORDER BY da.document_id, da.relationship_type, da.created_at`,
-    [documentIds]
-  );
+  const query = visibility
+    ? `SELECT da.document_id, da.related_id as id, da.relationship_type as type,
+              d.title, d.properties->>'color' as color
+       FROM document_associations da
+       JOIN documents d
+         ON da.related_id = d.id
+        AND d.workspace_id = $2
+        AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+       WHERE da.document_id = ANY($1)
+       ORDER BY da.document_id, da.relationship_type, da.created_at`
+    : `SELECT da.document_id, da.related_id as id, da.relationship_type as type,
+              d.title, d.properties->>'color' as color
+       FROM document_associations da
+       LEFT JOIN documents d ON da.related_id = d.id
+       WHERE da.document_id = ANY($1)
+       ORDER BY da.document_id, da.relationship_type, da.created_at`;
+  const params = visibility
+    ? [documentIds, visibility.workspaceId, visibility.userId, visibility.isAdmin]
+    : [documentIds];
+  const result = await pool.query(query, params);
 
   // Group results by document_id
   const associationsMap = new Map<string, BelongsToEntry[]>();

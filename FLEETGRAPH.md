@@ -68,7 +68,9 @@ When the user is on a page without a specific entity context (dashboard, setting
 
 ### Multi-turn threading
 
-Each chat session maintains conversation history (up to 20 messages, 30-minute TTL). The history is threaded into the LLM prompt so follow-up questions have full conversational context. If the user navigates to a different entity, a new conversation starts with fresh context. The previous conversation is fenced by `entityId` to prevent stale context from leaking across entity boundaries.
+Each workspace keeps one active Ship Chat thread for the current user. The visible scope can change as the user moves between issue, sprint, project, and workspace views, but the floating chat does not reset on those scope changes. The history is threaded into the prompt so follow-up questions keep their context while each turn still carries the latest page context and entity hint.
+
+Sensitive requests are denied immediately instead of entering tool or model execution. FleetGraph declines requests for secrets, credentials, env vars, database access, deployment internals, and infrastructure internals. Chat model steps also run with a bounded timeout so the UI can fail fast instead of hanging on "Analyzing workspace...".
 
 ## Use Cases
 

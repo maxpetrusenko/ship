@@ -68,6 +68,7 @@ Core job:
 - [Phase 1: Define Your Agent](./Phase%201/README.md)
 - [Phase 2: Graph Architecture](./Phase%202/README.md)
 - [Phase 3: Stack and Deployment](./Phase%203/README.md)
+- [LangGraph Runtime Architecture](./LANGGRAPH_RUNTIME_ARCHITECTURE.md)
 
 ## Planning Workflow
 

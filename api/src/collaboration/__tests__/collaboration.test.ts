@@ -714,9 +714,10 @@ describe('Collaboration Server', () => {
         )
         // If we get here, the database accepted it but returned no rows
         expect(true).toBe(true)
-      } catch (error: any) {
+      } catch (error) {
         // Expected - malformed UUID should throw
-        expect(error.message).toContain('invalid input syntax for type uuid')
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        expect(errorMessage).toContain('invalid input syntax for type uuid')
       }
     })
 

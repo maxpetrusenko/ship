@@ -20,10 +20,40 @@ import { broadcastToUser } from '../collaboration/index.js';
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
+interface ProjectRetroSprintRow {
+  title: string;
+  sprint_number: number;
+}
+
+interface ProjectRetroIssueRow {
+  title: string;
+  state: string;
+}
+
+interface RetroIssueSummary {
+  total: number;
+  completed: number;
+  cancelled: number;
+  active: number;
+}
+
 function parseCount(value: string | number | null | undefined): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return Number.parseInt(value, 10) || 0;
   return 0;
+}
+
+function buildRetroIssueSummary(issues: ProjectRetroIssueRow[]): RetroIssueSummary {
+  const completed = issues.filter(issue => issue.state === 'done').length;
+  const cancelled = issues.filter(issue => issue.state === 'cancelled').length;
+  const active = issues.filter(issue => !['done', 'cancelled'].includes(issue.state)).length;
+
+  return {
+    total: issues.length,
+    completed,
+    cancelled,
+    active,
+  };
 }
 
 // Helper to extract project from row with computed ice_score
@@ -134,8 +164,8 @@ const projectRetroSchema = z.object({
 // Helper to generate pre-filled retro content for a project
 async function generatePrefilledRetroContent(
   projectData: ProjectRow,
-  sprints: Array<{ title: string; sprint_number: number }>,
-  issues: Array<{ title: string; state: string }>,
+  sprints: ProjectRetroSprintRow[],
+  issues: ProjectRetroIssueRow[],
 ) {
   const props: Partial<ProjectProperties> = projectData.properties ?? {};
 
@@ -953,6 +983,8 @@ router.get('/:id/retro', authMiddleware, async (req: Request, res: Response) => 
          AND d.archived_at IS NULL AND d.deleted_at IS NULL`,
       [id]
     );
+    const retroIssues = issuesResult.rows as ProjectRetroIssueRow[];
+    const retroIssueSummary = buildRetroIssueSummary(retroIssues);
 
     if (hasRetro) {
       // Return existing retro data
@@ -965,19 +997,14 @@ router.get('/:id/retro', authMiddleware, async (req: Request, res: Response) => 
         next_steps: props.next_steps || null,
         content: projectData.content || {},
         weeks: sprintsResult.rows,
-        issues_summary: {
-          total: issuesResult.rows.length,
-          completed: issuesResult.rows.filter((i: any) => i.state === 'done').length,
-          cancelled: issuesResult.rows.filter((i: any) => i.state === 'cancelled').length,
-          active: issuesResult.rows.filter((i: any) => !['done', 'cancelled'].includes(i.state)).length,
-        },
+        issues_summary: retroIssueSummary,
       });
     } else {
       // Generate pre-filled draft
       const prefilledContent = await generatePrefilledRetroContent(
         projectData,
-        sprintsResult.rows,
-        issuesResult.rows
+        sprintsResult.rows as ProjectRetroSprintRow[],
+        retroIssues,
       );
 
       res.json({
@@ -989,12 +1016,7 @@ router.get('/:id/retro', authMiddleware, async (req: Request, res: Response) => 
         next_steps: null,
         content: prefilledContent,
         weeks: sprintsResult.rows,
-        issues_summary: {
-          total: issuesResult.rows.length,
-          completed: issuesResult.rows.filter((i: any) => i.state === 'done').length,
-          cancelled: issuesResult.rows.filter((i: any) => i.state === 'cancelled').length,
-          active: issuesResult.rows.filter((i: any) => !['done', 'cancelled'].includes(i.state)).length,
-        },
+        issues_summary: retroIssueSummary,
       });
     }
   } catch (err) {

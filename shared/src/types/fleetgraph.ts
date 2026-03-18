@@ -26,7 +26,8 @@ export type FleetGraphSignalType =
   | 'scope_drift'
   | 'approval_bottleneck'
   | 'ownership_gap'
-  | 'multi_signal_cluster';
+  | 'multi_signal_cluster'
+  | 'chat_suggestion';
 
 export type HumanGateOutcome = 'approve' | 'reject' | 'dismiss' | 'snooze';
 
@@ -148,6 +149,7 @@ export interface FleetGraphRunState {
   // Page context (on-demand only)
   entityType: FleetGraphEntityType | null;
   entityId: string | null;
+  pageContext: FleetGraphPageContext | null;
 
   // Fetched data
   coreContext: Record<string, unknown>;
@@ -201,6 +203,24 @@ export interface FleetGraphAlert {
   status: 'active' | 'dismissed' | 'snoozed' | 'resolved' | 'rejected';
   snoozedUntil: string | null;
   lastSurfacedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Per-recipient read timestamp (null = unread). Populated from recipient join. */
+  readAt: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Alert recipient (per-user notification state)
+// ---------------------------------------------------------------------------
+
+export interface FleetGraphAlertRecipient {
+  id: string;
+  alertId: string;
+  userId: string;
+  readAt: string | null;
+  dismissedAt: string | null;
+  snoozedUntil: string | null;
+  deliveredAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -304,6 +324,8 @@ export interface FleetGraphAlertsResponse {
   alerts: FleetGraphAlert[];
   pendingApprovals: FleetGraphApproval[];
   total: number;
+  /** Count of unread alerts for the requesting user. */
+  unreadCount: number;
 }
 
 /** POST /api/fleetgraph/alerts/:id/resolve */
@@ -337,6 +359,7 @@ export interface FleetGraphAlertEvent {
   entityId: string;
   severity: AlertSeverity;
   summary: string;
+  ownerUserId: string | null;
 }
 
 // Realtime event type string
@@ -351,6 +374,8 @@ export interface FleetGraphPageContext {
   surface: 'docs' | 'issue' | 'project' | 'sprint' | 'workspace';
   documentId?: string;
   title?: string;
+  tab?: string;
+  tabLabel?: string;
   documentType?: string;
   isEmpty?: boolean;
   breadcrumbs?: Array<{ id: string; title: string; type: string }>;
@@ -370,6 +395,9 @@ export interface FleetGraphChatThread {
   lastPageSurface: string | null;
   lastPageDocumentId: string | null;
   lastPageTitle: string | null;
+  /** Entity scope: threads can be scoped to a specific entity. */
+  entityType: FleetGraphEntityType | null;
+  entityId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -390,6 +418,7 @@ export interface FleetGraphCreateChatThreadResponse {
 export interface FleetGraphChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  alertId?: string;
   assessment?: FleetGraphAssessment;
   debug?: FleetGraphChatDebugInfo;
   timestamp: string;
@@ -400,6 +429,10 @@ export interface FleetGraphChatDebugInfo {
   branch: FleetGraphBranch;
   entityType: FleetGraphEntityType | null;
   entityId: string | null;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, unknown>;
+  }>;
   candidateSignals: FleetGraphSignalType[];
   accountability: {
     total: number;

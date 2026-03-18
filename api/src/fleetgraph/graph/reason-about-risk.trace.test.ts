@@ -3,13 +3,21 @@ import type { FleetGraphRunState } from '@ship/shared';
 
 const traceableMock = vi.hoisted(() =>
   vi.fn((wrappedFunc: (...args: unknown[]) => Promise<unknown> | unknown, config?: {
-    on_start?: (runTree: { id: string; client: { getHostUrl: () => string; getRunUrl: ({ runId }: { runId: string }) => Promise<string> } }) => void;
+    on_start?: (runTree: {
+      id: string;
+      client: {
+        getHostUrl: () => string;
+        readRunSharedLink: (runId: string) => Promise<string | undefined>;
+        shareRun: (runId: string) => Promise<string>;
+      };
+    }) => void;
   }) => async (...args: unknown[]) => {
     config?.on_start?.({
       id: 'deterministic-run-123',
       client: {
         getHostUrl: () => 'https://smith.langchain.com',
-        getRunUrl: async ({ runId }: { runId: string }) => `https://smith.langchain.com/o/org/projects/p/proj/r/${runId}?poll=true`,
+        readRunSharedLink: async () => undefined,
+        shareRun: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
       },
     });
     return await wrappedFunc(...args);
@@ -29,6 +37,7 @@ function makeState(overrides: Partial<FleetGraphRunState> = {}): FleetGraphRunSt
     actorUserId: 'user-1',
     entityType: 'sprint',
     entityId: 'sprint-14',
+    pageContext: null,
     coreContext: {},
     parallelSignals: {},
     candidates: [],
@@ -75,7 +84,7 @@ describe('reasonAboutRisk tracing', () => {
     );
 
     expect(traceableMock).toHaveBeenCalledTimes(1);
-    expect(result.traceUrl).toBe('https://smith.langchain.com/o/org/projects/p/proj/r/deterministic-run-123?poll=true');
+    expect(result.traceUrl).toBe('https://smith.langchain.com/public/deterministic-run-123/r');
     expect(result.assessment?.summary).toContain('1 overdue accountability items overall');
   });
 });

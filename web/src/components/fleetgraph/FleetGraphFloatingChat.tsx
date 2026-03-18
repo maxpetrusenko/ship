@@ -7,6 +7,7 @@ import { useState, useCallback, useEffect, Suspense, lazy } from 'react';
 import { cn } from '@/lib/cn';
 import { useFleetGraphScope } from '@/hooks/useFleetGraphScope';
 import { useFleetGraphPageContext } from '@/hooks/useFleetGraphPageContext';
+import { useFleetGraphOnDemand } from '@/hooks/useFleetGraph';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 
 const FleetGraphChat = lazy(() =>
@@ -17,11 +18,32 @@ const LOG_PREFIX = '[FleetGraph:FloatingChat]';
 
 export function FleetGraphFloatingChat() {
   const [isOpen, setIsOpen] = useState(false);
+  const [latestTraceUrl, setLatestTraceUrl] = useState<string | null>(null);
+  const [newThreadNonce, setNewThreadNonce] = useState(0);
   const scope = useFleetGraphScope();
   const pageContext = useFleetGraphPageContext(scope);
   const { currentWorkspace } = useWorkspace();
 
   const workspaceId = currentWorkspace?.id ?? null;
+  const onDemand = useFleetGraphOnDemand();
+
+  const handleTriggerAnalysis = useCallback(() => {
+    console.log(`${LOG_PREFIX} trigger clicked`, { scopeType: scope.scopeType, scopeId: scope.scopeId, workspaceId, pathname: window.location.pathname });
+    if (!workspaceId) return;
+    setLatestTraceUrl(null);
+    onDemand.mutate(
+      {
+        entityType: scope.scopeType === 'workspace' ? 'workspace' : scope.scopeType,
+        entityId: scope.scopeId,
+        workspaceId,
+      },
+      {
+        onSuccess: (result) => {
+          setLatestTraceUrl(result.traceUrl ?? null);
+        },
+      },
+    );
+  }, [onDemand, scope.scopeType, scope.scopeId, workspaceId]);
 
   const toggle = useCallback(() => {
     setIsOpen((v) => {
@@ -31,12 +53,21 @@ export function FleetGraphFloatingChat() {
     });
   }, []);
 
+  const handleNewThread = useCallback(() => {
+    if (!workspaceId) return;
+    setNewThreadNonce((current) => current + 1);
+  }, [workspaceId]);
+
   const isEntityScoped = scope.scopeType !== 'workspace';
 
   // Log context changes
   useEffect(() => {
     console.log(`${LOG_PREFIX} scope: type=${scope.scopeType} id=${scope.scopeId} label=${scope.scopeLabel}`);
   }, [scope.scopeType, scope.scopeId, scope.scopeLabel]);
+
+  useEffect(() => {
+    setLatestTraceUrl(null);
+  }, [scope.scopeType, scope.scopeId, workspaceId]);
 
   // Log mount
   useEffect(() => {
@@ -62,33 +93,102 @@ export function FleetGraphFloatingChat() {
               <svg className="w-3.5 h-3.5 text-accent flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <span className="text-xs font-medium text-foreground flex-shrink-0">FleetGraph</span>
-              <span className="text-[10px] text-muted bg-border/40 px-1.5 py-0.5 rounded truncate max-w-[120px]">
-                {scope.scopeType === 'workspace' ? 'Workspace' : scope.scopeType}
-              </span>
+              <span className="text-xs font-medium text-foreground flex-shrink-0">Ship Chat</span>
+              {isEntityScoped && (
+                <span className="text-[10px] text-muted bg-border/40 px-1.5 py-0.5 rounded truncate max-w-[120px]">
+                  {scope.scopeLabel}
+                </span>
+              )}
             </div>
-            <button
-              onClick={toggle}
-              className="text-muted hover:text-foreground transition-colors p-0.5 rounded hover:bg-border/30 flex-shrink-0"
-              aria-label="Close FleetGraph chat"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {/* Manual trigger button */}
+              <button
+                type="button"
+                onClick={handleTriggerAnalysis}
+                disabled={onDemand.isPending || !workspaceId}
+                title="Run FleetGraph analysis"
+                className={cn(
+                  'p-0.5 rounded transition-colors',
+                  'text-muted hover:text-accent hover:bg-accent/10',
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
+                  onDemand.isPending && 'animate-pulse',
+                )}
+                aria-label="Run FleetGraph analysis"
+              >
+                <svg
+                  className={cn(
+                    'w-3.5 h-3.5 transition-transform',
+                    onDemand.isPending && 'animate-spin text-accent',
+                  )}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={handleNewThread}
+                disabled={!workspaceId}
+                title="New thread"
+                className={cn(
+                  'p-0.5 rounded transition-colors',
+                  'text-muted hover:text-foreground hover:bg-border/30',
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
+                )}
+                aria-label="New thread"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={toggle}
+                className="text-muted hover:text-foreground transition-colors p-0.5 rounded hover:bg-border/30"
+                aria-label="Close Ship Chat"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-3">
+            {latestTraceUrl && (
+              <div className="mb-3 flex items-center justify-between rounded border border-accent/20 bg-accent/5 px-2.5 py-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted">
+                  <TraceArrowsIcon className="w-3 h-3" />
+                  <span>Trace</span>
+                </div>
+                <a
+                  href={latestTraceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Latest trace"
+                  className="inline-flex items-center gap-1 text-[10px] text-accent hover:underline"
+                >
+                  <TraceArrowsIcon className="w-3 h-3" />
+                  <span>Open</span>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 17L17 7M9 7h8v8" />
+                  </svg>
+                </a>
+              </div>
+            )}
             {workspaceId ? (
               <Suspense fallback={<ChatSkeleton />}>
                 <FleetGraphChat
                   entityType={scope.scopeType}
                   entityId={scope.scopeId}
                   workspaceId={workspaceId}
-                  scopeLabel={scope.scopeLabel}
+                  newThreadNonce={newThreadNonce}
                   scopeType={scope.scopeType}
                   pageContext={pageContext}
+                  persistAcrossScopes
                 />
               </Suspense>
             ) : (
@@ -107,6 +207,7 @@ export function FleetGraphFloatingChat() {
 
       {/* Floating action button */}
       <button
+        type="button"
         onClick={toggle}
         data-testid="fleetgraph-floating-btn"
         className={cn(
@@ -117,8 +218,8 @@ export function FleetGraphFloatingChat() {
             ? 'bg-accent text-white scale-90 h-12 w-12 justify-center'
             : 'bg-accent text-white hover:bg-accent/90 hover:scale-105 hover:shadow-xl hover:shadow-accent/30 h-12 px-4',
         )}
-        aria-label={isOpen ? 'Close FleetGraph' : `Open FleetGraph: ${scope.scopeLabel}`}
-        title={`FleetGraph: ${scope.scopeLabel}`}
+        aria-label={isOpen ? 'Close Ship Chat' : 'Open Ship Chat'}
+        title="Ship Chat"
       >
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -126,7 +227,7 @@ export function FleetGraphFloatingChat() {
         {/* Scope chip on button (collapsed state only) */}
         {!isOpen && (
           <span className="text-xs font-medium truncate max-w-[140px]">
-            {isEntityScoped ? scope.scopeLabel : 'Workspace'}
+            {isEntityScoped ? scope.scopeLabel : 'Ship Chat'}
           </span>
         )}
         {/* Green dot for entity-scoped context */}
@@ -135,6 +236,14 @@ export function FleetGraphFloatingChat() {
         )}
       </button>
     </>
+  );
+}
+
+function TraceArrowsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" />
+    </svg>
   );
 }
 

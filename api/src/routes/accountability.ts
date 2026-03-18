@@ -31,8 +31,13 @@ const router = Router();
  */
 router.get('/action-items', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const userId = req.userId!;
+    let userId = req.userId!;
     const workspaceId = req.workspaceId!;
+
+    // API tokens can query on behalf of another user (for FleetGraph agent)
+    if ((req as unknown as Record<string, unknown>).isApiToken && req.query.forUserId) {
+      userId = req.query.forUserId as string;
+    }
 
     // Get all missing accountability items via inference
     const missingItems = await checkMissingAccountability(userId, workspaceId);
@@ -121,8 +126,14 @@ router.get('/action-items', authMiddleware, async (req: Request, res: Response) 
  */
 router.get('/manager-action-items', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const userId = req.userId!;
+    let userId = req.userId!;
     const workspaceId = req.workspaceId!;
+
+    // API tokens can query on behalf of another user (for FleetGraph agent)
+    if ((req as unknown as Record<string, unknown>).isApiToken && req.query.forUserId) {
+      userId = req.query.forUserId as string;
+    }
+
     const items = await getManagerActionItems(userId, workspaceId);
     res.json({ items, total: items.length });
   } catch (err) {

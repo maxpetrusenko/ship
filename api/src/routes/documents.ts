@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { z } from 'zod';
+import { isTipTapDoc, type TipTapDoc } from '@ship/shared';
 import { authMiddleware } from '../middleware/auth.js';
-import { isWorkspaceAdmin } from '../middleware/visibility.js';
+import { getVisibilityContext, isWorkspaceAdmin, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { handleVisibilityChange, handleDocumentConversion, invalidateDocumentCache, broadcastToUser } from '../collaboration/index.js';
 import { extractHypothesisFromContent, extractSuccessCriteriaFromContent, extractVisionFromContent, extractGoalsFromContent, checkDocumentCompleteness } from '../utils/extractHypothesis.js';
 import { loadContentFromYjsState } from '../utils/yjsConverter.js';
@@ -10,12 +11,63 @@ import { loadContentFromYjsState } from '../utils/yjsConverter.js';
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
+type DocumentJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | DocumentJsonValue[]
+  | { [key: string]: DocumentJsonValue };
+
+type DocumentJsonObject = { [key: string]: DocumentJsonValue };
+
+interface DocumentApprovalState {
+  state?: string;
+  approved_by?: string | null;
+}
+
+interface AccessibleDocumentRow {
+  id: string;
+  title: string;
+  document_type: string;
+  created_by: string;
+  visibility: 'private' | 'workspace';
+  properties?: DocumentJsonObject | null;
+  content?: TipTapDoc | null;
+  yjs_state?: Buffer | null;
+  can_access: boolean;
+  converted_to_id?: string | null;
+  converted_by?: string | null;
+  archived_at?: string | null;
+  ticket_number?: number | null;
+}
+
+const documentJsonValueSchema: z.ZodType<DocumentJsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(documentJsonValueSchema),
+    z.record(z.string(), documentJsonValueSchema),
+  ]),
+);
+
+const documentJsonObjectSchema: z.ZodType<DocumentJsonObject> = z.record(
+  z.string(),
+  documentJsonValueSchema,
+);
+
+const tipTapDocSchema = z.custom<TipTapDoc>((value) => isTipTapDoc(value), {
+  message: 'Invalid TipTap document',
+});
+
 // Check if user can access a document (visibility check)
 async function canAccessDocument(
   docId: string,
   userId: string,
   workspaceId: string
-): Promise<{ canAccess: boolean; doc: any | null }> {
+): Promise<{ canAccess: boolean; doc: AccessibleDocumentRow | null }> {
   const result = await pool.query(
     `SELECT d.*,
             (d.visibility = 'workspace' OR d.created_by = $2 OR
@@ -39,9 +91,9 @@ const createDocumentSchema = z.object({
   parent_id: z.string().uuid().optional().nullable(),
   program_id: z.string().uuid().optional().nullable(),
   sprint_id: z.string().uuid().optional().nullable(),
-  properties: z.record(z.unknown()).optional(),
+  properties: documentJsonObjectSchema.optional(),
   visibility: z.enum(['private', 'workspace']).optional(),
-  content: z.any().optional(),
+  content: tipTapDocSchema.optional(),
   belongs_to: z.array(z.object({
     id: z.string().uuid(),
     type: z.enum(['program', 'project', 'sprint', 'parent']),
@@ -50,10 +102,10 @@ const createDocumentSchema = z.object({
 
 const updateDocumentSchema = z.object({
   title: z.string().min(1).max(255).optional(),
-  content: z.any().optional(),
+  content: tipTapDocSchema.optional(),
   parent_id: z.string().uuid().optional().nullable(),
   position: z.number().int().min(0).optional(),
-  properties: z.record(z.unknown()).optional(),
+  properties: documentJsonObjectSchema.optional(),
   visibility: z.enum(['private', 'workspace']).optional(),
   document_type: z.enum(['wiki', 'issue', 'program', 'project', 'sprint', 'person']).optional(),
   // Issue-specific fields (stored in properties but accepted at top level for convenience)
@@ -308,13 +360,17 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
     // Get belongs_to associations from junction table (for issues, wikis, sprints, and projects)
     let belongs_to: Array<{ id: string; type: string; title?: string; color?: string }> = [];
     if (doc.document_type === 'issue' || doc.document_type === 'wiki' || doc.document_type === 'sprint' || doc.document_type === 'project') {
+      const { isAdmin } = await getVisibilityContext(userId, workspaceId);
       const assocResult = await pool.query(
         `SELECT da.related_id as id, da.relationship_type as type,
                 d.title, (d.properties->>'color') as color
          FROM document_associations da
-         LEFT JOIN documents d ON d.id = da.related_id
+         JOIN documents d
+           ON d.id = da.related_id
+          AND d.workspace_id = $2
+          AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
          WHERE da.document_id = $1`,
-        [id]
+        [id, workspaceId, userId, isAdmin]
       );
       belongs_to = assocResult.rows.map(row => ({
         id: row.id,
@@ -648,7 +704,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: Array<string | number | null> = [];
     let paramIndex = 1;
 
     // Track extracted values from content (content is source of truth)
@@ -689,7 +745,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     }
 
     // Extract top-level issue/project/sprint fields that should be stored in properties
-    const topLevelProps: Record<string, unknown> = {};
+    const topLevelProps: DocumentJsonObject = {};
     if (data.state !== undefined) topLevelProps.state = data.state;
     if (data.priority !== undefined) topLevelProps.priority = data.priority;
     if (data.estimate !== undefined) topLevelProps.estimate = data.estimate;
@@ -741,7 +797,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     if (data.properties !== undefined || contentUpdated || hasTopLevelProps) {
       const currentProps = existing.properties || {};
       const dataProps = data.properties || {};
-      let newProps = {
+      let newProps: DocumentJsonObject = {
         ...currentProps,
         ...dataProps,
         ...topLevelProps,
@@ -942,7 +998,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     // When a weekly plan/retro is edited after changes were requested, move it back to re-review.
     if (contentUpdated && (existing.document_type === 'weekly_plan' || existing.document_type === 'weekly_retro')) {
-      const docProps = (existing.properties || {}) as Record<string, unknown>;
+      const docProps = existing.properties || {};
       const personId = typeof docProps.person_id === 'string' ? docProps.person_id : null;
       const projectId = typeof docProps.project_id === 'string' ? docProps.project_id : null;
       const rawWeekNumber = docProps.week_number;
@@ -976,9 +1032,9 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 
         if (sprintResult.rows.length > 0) {
           const sprint = sprintResult.rows[0];
-          const sprintProps = (sprint.properties || {}) as Record<string, unknown>;
+          const sprintProps = (sprint.properties || {}) as DocumentJsonObject;
           const approvalKey = existing.document_type === 'weekly_plan' ? 'plan_approval' : 'review_approval';
-          const approval = sprintProps[approvalKey] as { state?: string; approved_by?: string | null } | undefined;
+          const approval = sprintProps[approvalKey] as DocumentApprovalState | undefined;
 
           if (approval?.state === 'changes_requested') {
             const nextProps = {
@@ -1221,7 +1277,7 @@ router.post('/:id/convert', authMiddleware, async (req: Request, res: Response) 
     );
 
     // 2. Prepare new properties based on target type
-    let newProperties: Record<string, unknown>;
+    let newProperties: DocumentJsonObject;
     let newTicketNumber: number | null = null;
 
     if (target_type === 'project') {
@@ -1234,7 +1290,7 @@ router.post('/:id/convert', authMiddleware, async (req: Request, res: Response) 
         owner_id: userId,
         program_id: currentProps.program_id || null,
         // Track original ticket number for reference
-        promoted_from_ticket: doc.ticket_number,
+        promoted_from_ticket: doc.ticket_number ?? null,
       };
       // Clear ticket_number for projects
       newTicketNumber = null;

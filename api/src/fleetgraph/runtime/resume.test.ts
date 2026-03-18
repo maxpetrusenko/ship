@@ -22,6 +22,7 @@ vi.mock('../data/fetchers.js', () => ({
     entity: {
       id: 'iss-1',
       updated_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+      properties: { state: 'in_progress' },
     },
   }),
   fetchParallelSignals: vi.fn().mockResolvedValue({ lastActivityDays: 10 }),
@@ -82,6 +83,7 @@ function makeInitialState(runId: string): FleetGraphRunState {
     actorUserId: 'user-1',
     entityType: 'issue',
     entityId: 'iss-1',
+    pageContext: null,
     coreContext: {},
     parallelSignals: {},
     candidates: [],

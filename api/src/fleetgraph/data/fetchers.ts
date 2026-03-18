@@ -15,12 +15,6 @@ import type {
   FleetGraphAlert,
   FleetGraphAuditEntry,
 } from '@ship/shared';
-import type { MissingAccountabilityItem } from '../../services/accountability.js';
-import {
-  checkMissingAccountability,
-  getManagerActionItems,
-} from '../../services/accountability.js';
-
 import { ShipApiClient } from './client.js';
 import type {
   ShipIssue,
@@ -48,6 +42,10 @@ import { upsertAlert, logAuditEntry } from '../runtime/persistence.js';
 let _pool: pg.Pool | null = null;
 let _client: ShipApiClient | null = null;
 
+type ShipWeeksResponse = {
+  weeks?: ShipSprint[];
+};
+
 /** Call once at server startup to inject dependencies. */
 export function configureFleetGraphData(pool: pg.Pool, client?: ShipApiClient): void {
   _pool = pool;
@@ -64,39 +62,9 @@ function getClient(): ShipApiClient {
   return _client;
 }
 
-function toShipAccountabilityItems(items: MissingAccountabilityItem[]): ShipAccountabilityItem[] {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-
-  return items.map((item) => {
-    let daysOverdue = -999;
-
-    if (item.dueDate) {
-      const dueDate = new Date(`${item.dueDate}T00:00:00Z`);
-      const diffTime = today.getTime() - dueDate.getTime();
-      daysOverdue = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    } else if (item.type === 'changes_requested_plan' || item.type === 'changes_requested_retro') {
-      daysOverdue = 0;
-    }
-
-    return {
-      id: `${item.type}-${item.targetId}`,
-      title: item.message,
-      state: 'todo',
-      priority: 'high',
-      ticket_number: 0,
-      display_id: '',
-      is_system_generated: true,
-      accountability_type: item.type,
-      accountability_target_id: item.targetId,
-      target_title: item.targetTitle,
-      due_date: item.dueDate,
-      days_overdue: daysOverdue,
-      person_id: item.personId || null,
-      project_id: item.projectId || null,
-      week_number: item.weekNumber || null,
-    };
-  });
+function extractWeeks(result: ShipSprint[] | ShipWeeksResponse | null): ShipSprint[] {
+  if (Array.isArray(result)) return result;
+  return result?.weeks ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +178,8 @@ export async function fetchWorkspaceMembers(
 export async function fetchActiveSprints(
   client: ShipApiClient,
 ): Promise<ShipSprint[]> {
-  const result = await client.get<ShipSprint[]>('/api/weeks?status=active');
-  return result ?? [];
+  const result = await client.get<ShipSprint[] | ShipWeeksResponse>('/api/weeks?status=active');
+  return extractWeeks(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +190,8 @@ export async function fetchActiveSprints(
 export async function fetchAllSprints(
   client: ShipApiClient,
 ): Promise<ShipSprint[]> {
-  const result = await client.get<ShipSprint[]>('/api/weeks');
-  return result ?? [];
+  const result = await client.get<ShipSprint[] | ShipWeeksResponse>('/api/weeks');
+  return extractWeeks(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +377,8 @@ export interface ParallelSignalsResult {
   missingStandup: boolean;
   pendingApprovalDays: number;
   scopeDrift: boolean;
+  /** Full issue history entries for content scope drift analysis */
+  issueHistory: Array<{ field: string; old_value: unknown; new_value: unknown }>;
   /** Manager-scoped: direct reports with missed standups */
   managerActionItems: ManagerActionItem[];
 }
@@ -426,11 +396,16 @@ export async function fetchParallelSignals(
   const signalUserId = actorUserId ?? ownerUserId ?? null;
 
   try {
+    // Always use REST endpoints (respects API boundary; forUserId for actor-scoped queries)
     const accountabilityPromise = signalUserId
-      ? checkMissingAccountability(signalUserId, workspaceId).then(toShipAccountabilityItems)
+      ? client.get<ShipAccountabilityResponse>(
+          `/api/accountability/action-items?forUserId=${encodeURIComponent(signalUserId)}`,
+        ).then((r) => r?.items ?? []).catch(() => [])
       : fetchAccountabilityItems(client).catch(() => []);
     const managerItemsPromise = signalUserId
-      ? getManagerActionItems(signalUserId, workspaceId)
+      ? client.get<ManagerActionItemsResponse>(
+          `/api/accountability/manager-action-items?forUserId=${encodeURIComponent(signalUserId)}`,
+        ).then((r) => r?.items ?? []).catch(() => [])
       : fetchManagerActionItems(client, '').catch(() => []);
 
     // Fan-out: run fetches in parallel
@@ -492,6 +467,7 @@ export async function fetchParallelSignals(
       missingStandup,
       pendingApprovalDays,
       scopeDrift,
+      issueHistory: history.map((h) => ({ field: h.field, old_value: h.old_value, new_value: h.new_value })),
       managerActionItems: managerItems,
     };
   } catch (err) {
@@ -504,6 +480,7 @@ export async function fetchParallelSignals(
       missingStandup: false,
       pendingApprovalDays: 0,
       scopeDrift: false,
+      issueHistory: [],
       managerActionItems: [],
     };
   }

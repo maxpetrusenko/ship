@@ -6,11 +6,13 @@
 import type pg from 'pg';
 import type {
   FleetGraphAlert,
+  FleetGraphAlertRecipient,
   FleetGraphAuditEntry,
   FleetGraphApproval,
   FleetGraphApprovalStatus,
   FleetGraphChatThread,
   FleetGraphChatMessage,
+  FleetGraphEntityType,
   FleetGraphPageContext,
 } from '@ship/shared';
 
@@ -360,21 +362,170 @@ export async function getPendingApprovals(
 }
 
 // -------------------------------------------------------------------------
+// Alert recipients (per-user notification state)
+// -------------------------------------------------------------------------
+
+/** Upsert a single recipient row. */
+export async function createRecipient(
+  pool: pg.Pool,
+  alertId: string,
+  userId: string,
+): Promise<FleetGraphAlertRecipient> {
+  const result = await pool.query(
+    `INSERT INTO fleetgraph_alert_recipients (alert_id, user_id)
+     VALUES ($1, $2)
+     ON CONFLICT (alert_id, user_id) DO UPDATE SET updated_at = NOW()
+     RETURNING *`,
+    [alertId, userId],
+  );
+  return rowToRecipient(result.rows[0]);
+}
+
+/** Bulk upsert recipient rows. */
+export async function createRecipients(
+  pool: pg.Pool,
+  alertId: string,
+  userIds: string[],
+): Promise<FleetGraphAlertRecipient[]> {
+  if (userIds.length === 0) return [];
+  const results: FleetGraphAlertRecipient[] = [];
+  for (const userId of userIds) {
+    results.push(await createRecipient(pool, alertId, userId));
+  }
+  return results;
+}
+
+/**
+ * Get alerts for a specific user in a workspace.
+ * Joins through recipients table; returns only visible alerts
+ * (not dismissed, not currently snoozed).
+ */
+export async function getUserAlerts(
+  pool: pg.Pool,
+  userId: string,
+  workspaceId: string,
+): Promise<FleetGraphAlert[]> {
+  const result = await pool.query(
+    `SELECT a.*, r.read_at AS recipient_read_at
+     FROM fleetgraph_alerts a
+     JOIN fleetgraph_alert_recipients r ON r.alert_id = a.id
+     WHERE r.user_id = $1
+       AND a.workspace_id = $2
+       AND r.dismissed_at IS NULL
+       AND (r.snoozed_until IS NULL OR r.snoozed_until <= NOW())
+     ORDER BY a.last_surfaced_at DESC`,
+    [userId, workspaceId],
+  );
+  return result.rows.map((row) => ({
+    ...rowToAlert(row),
+    readAt: row.recipient_read_at ? (row.recipient_read_at as Date).toISOString() : null,
+  }));
+}
+
+/** Count unread alerts for a user in a workspace. */
+export async function getUnreadCount(
+  pool: pg.Pool,
+  userId: string,
+  workspaceId: string,
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*) AS cnt
+     FROM fleetgraph_alert_recipients r
+     JOIN fleetgraph_alerts a ON a.id = r.alert_id
+     WHERE r.user_id = $1
+       AND a.workspace_id = $2
+       AND r.read_at IS NULL
+       AND r.dismissed_at IS NULL
+       AND (r.snoozed_until IS NULL OR r.snoozed_until <= NOW())`,
+    [userId, workspaceId],
+  );
+  return parseInt(result.rows[0]?.cnt as string, 10) || 0;
+}
+
+/** Mark recipient rows as read. If alertIds is null/empty, marks all unread. */
+export async function markRecipientsRead(
+  pool: pg.Pool,
+  userId: string,
+  alertIds?: string[],
+): Promise<number> {
+  if (alertIds && alertIds.length > 0) {
+    const result = await pool.query(
+      `UPDATE fleetgraph_alert_recipients
+       SET read_at = NOW(), updated_at = NOW()
+       WHERE user_id = $1 AND alert_id = ANY($2) AND read_at IS NULL`,
+      [userId, alertIds],
+    );
+    return result.rowCount ?? 0;
+  }
+  const result = await pool.query(
+    `UPDATE fleetgraph_alert_recipients
+     SET read_at = NOW(), updated_at = NOW()
+     WHERE user_id = $1 AND read_at IS NULL`,
+    [userId],
+  );
+  return result.rowCount ?? 0;
+}
+
+/** Dismiss a recipient's view of an alert (recipient-level, not global). */
+export async function dismissRecipient(
+  pool: pg.Pool,
+  alertId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE fleetgraph_alert_recipients
+     SET dismissed_at = NOW(), updated_at = NOW()
+     WHERE alert_id = $1 AND user_id = $2 AND dismissed_at IS NULL`,
+    [alertId, userId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Snooze a recipient's view of an alert until a given time. */
+export async function snoozeRecipient(
+  pool: pg.Pool,
+  alertId: string,
+  userId: string,
+  until: Date,
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE fleetgraph_alert_recipients
+     SET snoozed_until = $3, updated_at = NOW()
+     WHERE alert_id = $1 AND user_id = $2`,
+    [alertId, userId, until],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// -------------------------------------------------------------------------
 // Chat threads (persistent conversation store)
 // -------------------------------------------------------------------------
 
 /** Max messages loaded into LLM prompt window. */
 const CHAT_MESSAGE_WINDOW = 20;
 
-/** Get the active thread for a user+workspace, or null. */
+/** Get the active thread for a user+workspace, optionally scoped to entity. */
 export async function getActiveThread(
   pool: pg.Pool,
   workspaceId: string,
   userId: string,
+  entityType?: FleetGraphEntityType | null,
+  entityId?: string | null,
 ): Promise<FleetGraphChatThread | null> {
+  if (entityType && entityId) {
+    const result = await pool.query(
+      `SELECT * FROM fleetgraph_chat_threads
+       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+         AND entity_type = $3 AND entity_id = $4
+       ORDER BY updated_at DESC LIMIT 1`,
+      [workspaceId, userId, entityType, entityId],
+    );
+    return result.rows[0] ? rowToThread(result.rows[0]) : null;
+  }
   const result = await pool.query(
     `SELECT * FROM fleetgraph_chat_threads
      WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+       AND entity_type IS NULL AND entity_id IS NULL
      ORDER BY updated_at DESC LIMIT 1`,
     [workspaceId, userId],
   );
@@ -396,38 +547,53 @@ export async function getThreadById(
   return result.rows[0] ? rowToThread(result.rows[0]) : null;
 }
 
-/** Create a new active thread. Archives any existing active thread first. */
+/** Create a new active thread. Archives same-scope active threads only. */
 export async function createThread(
   pool: pg.Pool,
   workspaceId: string,
   userId: string,
+  entityType?: FleetGraphEntityType | null,
+  entityId?: string | null,
 ): Promise<FleetGraphChatThread> {
-  // Archive existing active threads
-  await pool.query(
-    `UPDATE fleetgraph_chat_threads
-     SET status = 'archived', updated_at = NOW()
-     WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'`,
-    [workspaceId, userId],
-  );
+  // Archive same-scope active threads only
+  if (entityType && entityId) {
+    await pool.query(
+      `UPDATE fleetgraph_chat_threads
+       SET status = 'archived', updated_at = NOW()
+       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+         AND entity_type = $3 AND entity_id = $4`,
+      [workspaceId, userId, entityType, entityId],
+    );
+  } else {
+    await pool.query(
+      `UPDATE fleetgraph_chat_threads
+       SET status = 'archived', updated_at = NOW()
+       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
+         AND entity_type IS NULL AND entity_id IS NULL`,
+      [workspaceId, userId],
+    );
+  }
 
   const result = await pool.query(
-    `INSERT INTO fleetgraph_chat_threads (workspace_id, user_id, status)
-     VALUES ($1, $2, 'active')
+    `INSERT INTO fleetgraph_chat_threads (workspace_id, user_id, status, entity_type, entity_id)
+     VALUES ($1, $2, 'active', $3, $4)
      RETURNING *`,
-    [workspaceId, userId],
+    [workspaceId, userId, entityType ?? null, entityId ?? null],
   );
   return rowToThread(result.rows[0]);
 }
 
-/** Get or create the active thread for a user+workspace. */
+/** Get or create the active thread for a user+workspace, optionally entity-scoped. */
 export async function getOrCreateActiveThread(
   pool: pg.Pool,
   workspaceId: string,
   userId: string,
+  entityType?: FleetGraphEntityType | null,
+  entityId?: string | null,
 ): Promise<FleetGraphChatThread> {
-  const existing = await getActiveThread(pool, workspaceId, userId);
+  const existing = await getActiveThread(pool, workspaceId, userId, entityType, entityId);
   if (existing) return existing;
-  return createThread(pool, workspaceId, userId);
+  return createThread(pool, workspaceId, userId, entityType, entityId);
 }
 
 /** Append a message to a thread. */
@@ -438,16 +604,20 @@ export async function appendChatMessage(
   content: string,
   assessment?: unknown,
   debug?: unknown,
+  alertId?: string,
+  traceUrl?: string | null,
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO fleetgraph_chat_messages (thread_id, role, content, assessment, debug)
-     VALUES ($1, $2, $3, $4, $5)`,
+    `INSERT INTO fleetgraph_chat_messages (thread_id, role, content, assessment, debug, alert_id, trace_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       threadId,
       role,
       content,
       assessment ? JSON.stringify(assessment) : null,
       debug ? JSON.stringify(debug) : null,
+      alertId ?? null,
+      traceUrl ?? null,
     ],
   );
   // Touch thread updated_at
@@ -511,17 +681,23 @@ function rowToThread(row: Record<string, unknown>): FleetGraphChatThread {
     lastPageSurface: (row.last_page_surface as string) ?? null,
     lastPageDocumentId: (row.last_page_document_id as string) ?? null,
     lastPageTitle: (row.last_page_title as string) ?? null,
+    entityType: (row.entity_type as FleetGraphChatThread['entityType']) ?? null,
+    entityId: (row.entity_id as string) ?? null,
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),
   };
 }
 
 function rowToChatMessage(row: Record<string, unknown>): FleetGraphChatMessage {
+  const baseDebug = (row.debug as FleetGraphChatMessage['debug']) ?? undefined;
+  const traceUrl = (row.trace_url as string | null) ?? null;
+
   return {
     role: row.role as 'user' | 'assistant',
     content: row.content as string,
+    alertId: (row.alert_id as string | null) ?? undefined,
     assessment: (row.assessment as FleetGraphChatMessage['assessment']) ?? undefined,
-    debug: (row.debug as FleetGraphChatMessage['debug']) ?? undefined,
+    debug: baseDebug ? { ...baseDebug, traceUrl: traceUrl ?? baseDebug.traceUrl } : undefined,
     timestamp: (row.created_at as Date).toISOString(),
   };
 }
@@ -548,6 +724,20 @@ function rowToApproval(row: Record<string, unknown>): FleetGraphApproval {
   };
 }
 
+function rowToRecipient(row: Record<string, unknown>): FleetGraphAlertRecipient {
+  return {
+    id: row.id as string,
+    alertId: row.alert_id as string,
+    userId: row.user_id as string,
+    readAt: row.read_at ? (row.read_at as Date).toISOString() : null,
+    dismissedAt: row.dismissed_at ? (row.dismissed_at as Date).toISOString() : null,
+    snoozedUntil: row.snoozed_until ? (row.snoozed_until as Date).toISOString() : null,
+    deliveredAt: (row.delivered_at as Date).toISOString(),
+    createdAt: (row.created_at as Date).toISOString(),
+    updatedAt: (row.updated_at as Date).toISOString(),
+  };
+}
+
 function rowToAlert(row: Record<string, unknown>): FleetGraphAlert {
   return {
     id: row.id as string,
@@ -566,5 +756,6 @@ function rowToAlert(row: Record<string, unknown>): FleetGraphAlert {
     lastSurfacedAt: (row.last_surfaced_at as Date).toISOString(),
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),
+    readAt: null,
   };
 }

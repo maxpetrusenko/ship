@@ -15,6 +15,7 @@ import type {
   FleetGraphErrorLog,
   HumanGateOutcome,
   FleetGraphChatMessage,
+  FleetGraphPageContext,
   FleetGraphTrigger,
 } from '@ship/shared';
 
@@ -33,6 +34,7 @@ export const FleetGraphState = Annotation.Root({
   // Page context (on-demand only)
   entityType: Annotation<FleetGraphEntityType | null>,
   entityId: Annotation<string | null>,
+  pageContext: Annotation<FleetGraphPageContext | null>,
 
   // Fetched data
   coreContext: Annotation<Record<string, unknown>>,

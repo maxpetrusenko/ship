@@ -24,6 +24,7 @@ const SIGNAL_LABELS: Record<FleetGraphSignalType, string> = {
   approval_bottleneck: 'Approval Bottleneck',
   ownership_gap: 'Ownership Gap',
   multi_signal_cluster: 'Multiple Signals',
+  chat_suggestion: 'Chat Suggestion',
 };
 
 const SEVERITY_CONFIG: Record<AlertSeverity, { dot: string; bg: string; text: string }> = {
@@ -38,6 +39,13 @@ const SNOOZE_OPTIONS = [
   { label: '1 hr', minutes: 60 },
   { label: '1 day', minutes: 1440 },
 ];
+
+const ENTITY_CTA_LABELS: Record<string, string> = {
+  issue: 'View Issue',
+  sprint: 'View Sprint',
+  project: 'View Project',
+  workspace: 'View Workspace',
+};
 
 // ---------------------------------------------------------------------------
 // Props
@@ -201,7 +209,7 @@ function NotificationRow({
             'bg-accent/10 text-accent hover:bg-accent/20',
           )}
         >
-          Open context
+          {ENTITY_CTA_LABELS[alert.entityType] ?? 'View Details'}
         </button>
         <button
           onClick={handleDismiss}

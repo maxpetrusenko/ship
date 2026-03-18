@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { isWorkspaceAdmin } from '../middleware/visibility.js';
+import { isWorkspaceAdmin, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 
 type RouterType = ReturnType<typeof Router>;
 export const searchRouter: RouterType = Router();
@@ -128,7 +128,7 @@ searchRouter.get('/learnings', authMiddleware, async (req: Request, res: Respons
       SELECT
         d.id,
         d.title,
-        prog_da.related_id as program_id,
+        prog.id as program_id,
         d.properties->>'category' as category,
         d.properties->'tags' as tags,
         d.properties->>'source_prd' as source_prd,
@@ -138,6 +138,13 @@ searchRouter.get('/learnings', authMiddleware, async (req: Request, res: Respons
         substring(d.content::text, 1, 500) as content_preview
       FROM documents d
       LEFT JOIN document_associations prog_da ON d.id = prog_da.document_id AND prog_da.relationship_type = 'program'
+      LEFT JOIN documents prog
+        ON prog_da.related_id = prog.id
+       AND prog.document_type = 'program'
+       AND prog.workspace_id = $1
+       AND prog.archived_at IS NULL
+       AND prog.deleted_at IS NULL
+       AND ${VISIBILITY_FILTER_SQL('prog', '$2', '$3')}
       WHERE d.workspace_id = $1
         AND d.document_type = 'wiki'
         AND d.archived_at IS NULL

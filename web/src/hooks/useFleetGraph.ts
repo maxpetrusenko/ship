@@ -1,9 +1,10 @@
 /**
  * React Query hooks for FleetGraph API.
- * Uses quietGet/quietPost pattern for background requests.
+ * Delegates CSRF + auth to the shared api.ts helpers.
  */
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiGet, apiPost } from '@/lib/api';
 import type {
   FleetGraphEntityType,
   FleetGraphAlertsResponse,
@@ -16,62 +17,9 @@ import type {
   FleetGraphPageContext,
 } from '@ship/shared';
 
-const API_URL = import.meta.env.VITE_API_URL ?? '';
-
-let quietCsrfToken: string | null = null;
-
-function isJsonResponse(response: Response): boolean {
-  return response.headers.get('content-type')?.includes('application/json') ?? false;
-}
-
+/** @deprecated kept for test compat; CSRF now managed by api.ts */
 export function clearQuietCsrfToken(): void {
-  quietCsrfToken = null;
-}
-
-async function getQuietCsrfToken(): Promise<string | null> {
-  if (quietCsrfToken) return quietCsrfToken;
-  try {
-    const res = await fetch(`${API_URL}/api/csrf-token`, { credentials: 'include' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    quietCsrfToken = data.token;
-    return quietCsrfToken;
-  } catch {
-    return null;
-  }
-}
-
-async function quietGet(endpoint: string): Promise<Response> {
-  return fetch(`${API_URL}${endpoint}`, { credentials: 'include' });
-}
-
-async function quietPost(endpoint: string, body: object): Promise<Response> {
-  const token = await getQuietCsrfToken();
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { 'X-CSRF-Token': token } : {}),
-    },
-    credentials: 'include',
-    body: JSON.stringify(body),
-  });
-
-  if (response.status === 403 && isJsonResponse(response)) {
-    clearQuietCsrfToken();
-    const refreshedToken = await getQuietCsrfToken();
-    return fetch(`${API_URL}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(refreshedToken ? { 'X-CSRF-Token': refreshedToken } : {}),
-      },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-  }
-
-  return response;
+  // no-op: CSRF token lifecycle managed by @/lib/api
 }
 
 // -------------------------------------------------------------------------
@@ -84,7 +32,8 @@ export const fleetgraphKeys = {
     [...fleetgraphKeys.all, 'alerts', entityType, entityId] as const,
   allAlerts: () => [...fleetgraphKeys.all, 'alerts-all'] as const,
   status: () => [...fleetgraphKeys.all, 'status'] as const,
-  thread: () => [...fleetgraphKeys.all, 'thread'] as const,
+  thread: (entityType?: string, entityId?: string) =>
+    [...fleetgraphKeys.all, 'thread', entityType, entityId] as const,
 };
 
 // -------------------------------------------------------------------------
@@ -103,7 +52,7 @@ export function useFleetGraphAlerts(
       if (entityId) params.set('entityId', entityId);
       const qs = params.toString();
       const url = `/api/fleetgraph/alerts${qs ? `?${qs}` : ''}`;
-      const res = await quietGet(url);
+      const res = await apiGet(url);
       if (!res.ok) throw new Error('Failed to fetch alerts');
       return res.json();
     },
@@ -117,7 +66,7 @@ export function useFleetGraphStatus() {
   return useQuery<FleetGraphStatusResponse>({
     queryKey: fleetgraphKeys.status(),
     queryFn: async () => {
-      const res = await quietGet('/api/fleetgraph/status');
+      const res = await apiGet('/api/fleetgraph/status');
       if (!res.ok) throw new Error('Failed to fetch status');
       return res.json();
     },
@@ -138,11 +87,21 @@ export function useFleetGraphOnDemand() {
     { entityType: FleetGraphEntityType; entityId: string; workspaceId: string; question?: string }
   >({
     mutationFn: async (params) => {
-      const res = await quietPost('/api/fleetgraph/on-demand', params);
-      if (!res.ok) throw new Error('Failed to run on-demand analysis');
+      console.log('[FleetGraph] mutationFn firing, POST /api/fleetgraph/on-demand', params);
+      const res = await apiPost('/api/fleetgraph/on-demand', params);
+      console.log('[FleetGraph] on-demand response:', res.status, res.statusText);
+      if (!res.ok) throw new Error(`on-demand analysis failed: ${res.status}`);
       return res.json();
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      console.log('[FleetGraph] on-demand result:', {
+        runId: data.runId,
+        branch: data.branch,
+        alertCount: data.alerts?.length ?? 0,
+        hasAssessment: !!data.assessment,
+        assessment: data.assessment,
+        traceUrl: data.traceUrl,
+      });
       queryClient.invalidateQueries({
         queryKey: fleetgraphKeys.alerts(variables.entityType, variables.entityId),
       });
@@ -151,8 +110,6 @@ export function useFleetGraphOnDemand() {
 }
 
 export function useFleetGraphChat() {
-  const queryClient = useQueryClient();
-
   return useMutation<
     FleetGraphChatResponse,
     Error,
@@ -166,14 +123,9 @@ export function useFleetGraphChat() {
     }
   >({
     mutationFn: async (params) => {
-      const res = await quietPost('/api/fleetgraph/chat', params);
+      const res = await apiPost('/api/fleetgraph/chat', params);
       if (!res.ok) throw new Error('Failed to send chat message');
       return res.json();
-    },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: fleetgraphKeys.alerts(variables.entityType, variables.entityId),
-      });
     },
   });
 }
@@ -183,11 +135,18 @@ export function useFleetGraphChat() {
 // -------------------------------------------------------------------------
 
 /** Load the active chat thread + its messages. */
-export function useFleetGraphThread() {
+export function useFleetGraphThread(
+  entityType?: FleetGraphEntityType,
+  entityId?: string,
+) {
   return useQuery<FleetGraphChatThreadResponse>({
-    queryKey: fleetgraphKeys.thread(),
+    queryKey: fleetgraphKeys.thread(entityType, entityId),
     queryFn: async () => {
-      const res = await quietGet('/api/fleetgraph/chat/thread');
+      const params = new URLSearchParams();
+      if (entityType) params.set('entityType', entityType);
+      if (entityId) params.set('entityId', entityId);
+      const qs = params.toString();
+      const res = await apiGet(`/api/fleetgraph/chat/thread${qs ? `?${qs}` : ''}`);
       if (!res.ok) throw new Error('Failed to load thread');
       return res.json();
     },
@@ -196,17 +155,23 @@ export function useFleetGraphThread() {
 }
 
 /** Create a new chat thread (archives previous active). */
-export function useFleetGraphCreateThread() {
+export function useFleetGraphCreateThread(
+  entityType?: FleetGraphEntityType,
+  entityId?: string,
+) {
   const queryClient = useQueryClient();
 
   return useMutation<FleetGraphCreateChatThreadResponse, Error, void>({
     mutationFn: async () => {
-      const res = await quietPost('/api/fleetgraph/chat/thread', {});
+      const res = await apiPost('/api/fleetgraph/chat/thread', {
+        entityType,
+        entityId,
+      });
       if (!res.ok) throw new Error('Failed to create thread');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.thread() });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.thread(entityType, entityId) });
     },
   });
 }
@@ -220,7 +185,7 @@ export function useFleetGraphResolve() {
     { alertId: string; outcome: FleetGraphAlertResolveRequest['outcome']; snoozeDurationMinutes?: number; reason?: string }
   >({
     mutationFn: async ({ alertId, outcome, snoozeDurationMinutes, reason }) => {
-      const res = await quietPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
+      const res = await apiPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
         outcome,
         snoozeDurationMinutes,
         reason,
@@ -246,7 +211,7 @@ export function useFleetGraphAllAlerts() {
   return useQuery<FleetGraphAlertsResponse>({
     queryKey: fleetgraphKeys.allAlerts(),
     queryFn: async () => {
-      const res = await quietGet('/api/fleetgraph/alerts');
+      const res = await apiGet('/api/fleetgraph/alerts');
       if (!res.ok) throw new Error('Failed to fetch all alerts');
       return res.json();
     },
@@ -257,17 +222,16 @@ export function useFleetGraphAllAlerts() {
 
 /**
  * Composite hook for the notification bell.
- * Returns the alerts list and derived unread count.
+ * Returns the alerts list and unread count from recipient table.
  */
 export function useFleetGraphNotifications() {
   const { data, isLoading, isError } = useFleetGraphAllAlerts();
   const alerts = data?.alerts ?? [];
-  const activeAlerts = alerts.filter((a) => a.status === 'active');
 
   return {
     alerts,
-    activeAlerts,
-    unreadCount: activeAlerts.length,
+    activeAlerts: alerts,
+    unreadCount: data?.unreadCount ?? 0,
     isLoading,
     isError,
   };
@@ -279,7 +243,7 @@ export function useFleetGraphDismissAlert() {
 
   return useMutation<{ success: boolean }, Error, string>({
     mutationFn: async (alertId) => {
-      const res = await quietPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
+      const res = await apiPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
         outcome: 'dismiss',
       });
       if (!res.ok) throw new Error('Failed to dismiss alert');
@@ -297,7 +261,7 @@ export function useFleetGraphSnoozeAlert() {
 
   return useMutation<{ success: boolean }, Error, { alertId: string; minutes: number }>({
     mutationFn: async ({ alertId, minutes }) => {
-      const res = await quietPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
+      const res = await apiPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
         outcome: 'snooze',
         snoozeDurationMinutes: minutes,
       });
@@ -333,7 +297,7 @@ export function useFleetGraphPageView(
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
-      quietPost('/api/fleetgraph/page-view', { entityType, entityId }).catch(() => {
+      apiPost('/api/fleetgraph/page-view', { entityType, entityId }).catch(() => {
         // fire-and-forget: swallow errors
       });
     }, PAGE_VIEW_DEBOUNCE_MS);
@@ -344,6 +308,22 @@ export function useFleetGraphPageView(
   }, [entityType, entityId]);
 }
 
+/** Mark all alerts as read (recipient-level, alerts stay active). */
+export function useFleetGraphMarkAllRead() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ success: boolean; markedCount: number }, Error, void>({
+    mutationFn: async () => {
+      const res = await apiPost('/api/fleetgraph/alerts/mark-read', {});
+      if (!res.ok) throw new Error('Failed to mark alerts as read');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.all });
+    },
+  });
+}
+
 /** Dismiss all active alerts at once. */
 export function useFleetGraphDismissAll() {
   const queryClient = useQueryClient();
@@ -351,10 +331,9 @@ export function useFleetGraphDismissAll() {
 
   return useMutation<void, Error, void>({
     mutationFn: async () => {
-      // Dismiss each active alert in parallel
       const results = await Promise.allSettled(
         activeAlerts.map((alert) =>
-          quietPost(`/api/fleetgraph/alerts/${alert.id}/resolve`, {
+          apiPost(`/api/fleetgraph/alerts/${alert.id}/resolve`, {
             outcome: 'dismiss',
           }),
         ),

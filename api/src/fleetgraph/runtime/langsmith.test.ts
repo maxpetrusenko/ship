@@ -40,15 +40,54 @@ describe('fleetgraph LangSmith env helpers', () => {
     })).toBe('legacy-project');
   });
 
-  it('resolves canonical run URLs through the LangSmith client', async () => {
+  it('resolves existing public run URLs through the LangSmith client', async () => {
     const url = await resolveLangSmithRunUrl(
       'run-123',
       {
-        getRunUrl: async ({ runId }: { runId: string }) => `https://smith.langchain.com/o/org/projects/p/proj/r/${runId}?poll=true`,
+        readRunSharedLink: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
+        shareRun: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
       },
       { LANGSMITH_TRACING: 'true', LANGSMITH_API_KEY: 'lsv2-key' },
     );
 
-    expect(url).toBe('https://smith.langchain.com/o/org/projects/p/proj/r/run-123?poll=true');
+    expect(url).toBe('https://smith.langchain.com/public/run-123/r');
+  });
+
+  it('creates a public run URL when no shared link exists yet', async () => {
+    const url = await resolveLangSmithRunUrl(
+      'run-123',
+      {
+        readRunSharedLink: async () => undefined,
+        shareRun: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
+      },
+      { LANGSMITH_TRACING: 'true', LANGSMITH_API_KEY: 'lsv2-key' },
+    );
+
+    expect(url).toBe('https://smith.langchain.com/public/run-123/r');
+  });
+
+  it('retries transient run-not-found errors before sharing the run', async () => {
+    let attempts = 0;
+
+    const url = await resolveLangSmithRunUrl(
+      'run-123',
+      {
+        readRunSharedLink: async () => undefined,
+        shareRun: async (runId: string) => {
+          attempts += 1;
+          if (attempts < 3) {
+            const err = new Error('Run not found') as Error & { status?: number };
+            err.status = 404;
+            throw err;
+          }
+          return `https://smith.langchain.com/public/${runId}/r`;
+        },
+      },
+      { LANGSMITH_TRACING: 'true', LANGSMITH_API_KEY: 'lsv2-key' },
+      { maxAttempts: 3, retryDelayMs: 0 },
+    );
+
+    expect(url).toBe('https://smith.langchain.com/public/run-123/r');
+    expect(attempts).toBe(3);
   });
 });

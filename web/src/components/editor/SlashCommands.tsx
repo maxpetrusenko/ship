@@ -1,6 +1,7 @@
-import { Extension } from '@tiptap/core';
+import { Editor, Extension, Range } from '@tiptap/core';
 import { ReactRenderer } from '@tiptap/react';
-import Suggestion, { SuggestionOptions } from '@tiptap/suggestion';
+import Suggestion, { SuggestionKeyDownProps, SuggestionOptions, SuggestionProps } from '@tiptap/suggestion';
+import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import tippy, { Instance as TippyInstance } from 'tippy.js';
 import {
   forwardRef,
@@ -51,11 +52,16 @@ export interface SlashCommandItem {
   description: string;
   aliases: string[];
   icon: React.ReactNode;
-  command: (props: { editor: any; range: any }) => void;
+  command: (props: SlashCommandContext) => void | Promise<void>;
   /** If set, command only shows for these document types (e.g., ['program']) */
   documentTypes?: string[];
   /** If true, command requires onCreateSubDocument callback to function */
   requiresSubDocumentCallback?: boolean;
+}
+
+interface SlashCommandContext {
+  editor: Editor;
+  range: Range;
 }
 
 interface CommandListProps {
@@ -401,7 +407,7 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
               const { state, view } = editor;
               let imagePos: number | null = null;
 
-              state.doc.descendants((node: any, pos: number) => {
+              state.doc.descendants((node: ProseMirrorNode, pos: number) => {
                 if (node.type.name === 'image' && node.attrs.src === dataUrl) {
                   imagePos = pos;
                   return false;
@@ -586,13 +592,15 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
     name: 'slashCommands',
 
     addOptions() {
+      const suggestionOptions: Partial<SuggestionOptions<SlashCommandItem, SlashCommandItem>> = {
+        char: '/',
+        command: ({ editor, range, props }) => {
+          props.command({ editor, range });
+        },
+      };
+
       return {
-        suggestion: {
-          char: '/',
-          command: ({ editor, range, props }: { editor: any; range: any; props: SlashCommandItem }) => {
-            props.command({ editor, range });
-          },
-        } as Partial<SuggestionOptions>,
+        suggestion: suggestionOptions,
       };
     },
 
@@ -656,10 +664,10 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
           },
           render: () => {
             let component: ReactRenderer<CommandListRef> | null = null;
-            let popup: TippyInstance[] | null = null;
+            let popup: TippyInstance | null = null;
 
             return {
-              onStart: (props: any) => {
+              onStart: (props: SuggestionProps<SlashCommandItem, SlashCommandItem>) => {
                 component = new ReactRenderer(CommandList, {
                   props,
                   editor: props.editor,
@@ -669,8 +677,8 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
                   return;
                 }
 
-                popup = tippy('body', {
-                  getReferenceClientRect: props.clientRect,
+                popup = tippy(document.body, {
+                  getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
                   appendTo: () => document.body,
                   content: component.element,
                   showOnCreate: true,
@@ -680,21 +688,21 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
                 });
               },
 
-              onUpdate(props: any) {
+              onUpdate(props: SuggestionProps<SlashCommandItem, SlashCommandItem>) {
                 component?.updateProps(props);
 
                 if (!props.clientRect) {
                   return;
                 }
 
-                popup?.[0]?.setProps({
-                  getReferenceClientRect: props.clientRect,
+                popup?.setProps({
+                  getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
                 });
               },
 
-              onKeyDown(props: any) {
+              onKeyDown(props: SuggestionKeyDownProps) {
                 if (props.event.key === 'Escape') {
-                  popup?.[0]?.hide();
+                  popup?.hide();
                   return true;
                 }
 
@@ -702,7 +710,7 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
               },
 
               onExit() {
-                popup?.[0]?.destroy();
+                popup?.destroy();
                 component?.destroy();
               },
             };

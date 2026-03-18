@@ -38,6 +38,7 @@ function makeAlert(overrides: Partial<FleetGraphAlert> = {}): FleetGraphAlert {
     recommendation: 'Follow up with assignee.',
     citations: [],
     ownerUserId: 'user-1',
+    readAt: null,
     status: 'active',
     snoozedUntil: null,
     lastSurfacedAt: new Date().toISOString(),
@@ -63,10 +64,12 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 function setupFetch(alerts: FleetGraphAlert[]) {
+  const activeAlerts = alerts.filter((a) => a.status === 'active');
   const response: FleetGraphAlertsResponse = {
     alerts,
     pendingApprovals: [],
     total: alerts.length,
+    unreadCount: activeAlerts.length,
   };
 
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
