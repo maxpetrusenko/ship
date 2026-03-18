@@ -555,8 +555,17 @@ export function FleetGraphChat({
       }
 
       if (result.message) {
-        setMessages((prev) => [...prev, result.message]);
-        console.log(`${LOG_PREFIX} assistant message`, result.message);
+        const assistantMessage = result.traceUrl && result.message.debug
+          ? {
+            ...result.message,
+            debug: {
+              ...result.message.debug,
+              traceUrl: result.message.debug.traceUrl ?? result.traceUrl,
+            },
+          }
+          : result.message;
+        setMessages((prev) => [...prev, assistantMessage]);
+        console.log(`${LOG_PREFIX} assistant message`, assistantMessage);
       }
     } catch {
       const currentKey = `${entityFenceRef.current.entityType}:${entityFenceRef.current.entityId}`;

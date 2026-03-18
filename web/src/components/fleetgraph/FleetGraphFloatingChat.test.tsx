@@ -69,8 +69,9 @@ describe('FleetGraphFloatingChat', () => {
     latestTraceUrl = 'https://smith.langchain.com/runs/run-floating';
     render(<FleetGraphFloatingChat />);
 
-    expect(screen.getByText('Issue 1')).toBeInTheDocument();
+    expect(screen.getByTestId('fleetgraph-floating-btn')).toHaveTextContent('Ship Chat');
     fireEvent.click(screen.getByRole('button', { name: /open ship chat/i }));
+    expect(screen.getByText('Issue 1')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /run fleetgraph analysis/i }));
 
     expect(mockOnDemandMutate).toHaveBeenCalledWith(
@@ -101,6 +102,14 @@ describe('FleetGraphFloatingChat', () => {
     // But no verbose scope chrome
     expect(screen.queryByText('issue')).not.toBeInTheDocument();
     expect(screen.queryByText('Scope')).not.toBeInTheDocument();
+  });
+
+  it('keeps the collapsed launcher branded as Ship Chat on entity-scoped pages', () => {
+    render(<FleetGraphFloatingChat />);
+
+    const launcher = screen.getByTestId('fleetgraph-floating-btn');
+    expect(launcher).toHaveTextContent('Ship Chat');
+    expect(launcher).not.toHaveTextContent('Issue 1');
   });
 
   it('moves new thread into the header as a plus action', async () => {

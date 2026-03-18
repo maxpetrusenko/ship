@@ -198,6 +198,65 @@ describe('FleetGraphChat', () => {
     expect(screen.getAllByText('5').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('falls back to the chat response trace URL when the assistant debug payload misses it', async () => {
+    mockMutateAsync.mockResolvedValue({
+      conversationId: 'conv-1',
+      runId: 'run-1',
+      branch: 'inform_only',
+      traceUrl: 'https://smith.langchain.com/public/chat-run-1/r',
+      assessment: {
+        summary: 'The issue is blocked on API latency.',
+        recommendation: 'Inspect the latest save failures.',
+        branch: 'inform_only',
+        citations: ['issue-context'],
+      },
+      alerts: [],
+      message: {
+        role: 'assistant',
+        content: 'The issue is blocked on API latency.',
+        assessment: {
+          summary: 'The issue is blocked on API latency.',
+          recommendation: 'Inspect the latest save failures.',
+          branch: 'inform_only',
+          citations: ['issue-context'],
+        },
+        debug: {
+          traceUrl: null,
+          branch: 'inform_only',
+          entityType: 'issue',
+          entityId: 'issue-1',
+          candidateSignals: ['stale_issue'],
+          accountability: {
+            total: 1,
+            overdue: 1,
+            dueToday: 0,
+          },
+          managerActionItems: 0,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    render(<FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'What is blocked?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+
+    await screen.findByText('The issue is blocked on API latency.');
+    expect(await screen.findByRole('link', { name: 'Trace' })).toHaveAttribute(
+      'href',
+      'https://smith.langchain.com/public/chat-run-1/r',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Debug' }));
+
+    expect(screen.getByRole('link', { name: /open trace/i })).toHaveAttribute(
+      'href',
+      'https://smith.langchain.com/public/chat-run-1/r',
+    );
+    expect(screen.queryByText('Unavailable')).not.toBeInTheDocument();
+  });
+
   it('renders inform-only replies as direct chat text instead of meta chrome', async () => {
     mockMutateAsync.mockResolvedValue({
       conversationId: 'conv-1',

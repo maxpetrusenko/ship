@@ -227,7 +227,7 @@ export function FleetGraphFloatingChat() {
         {/* Scope chip on button (collapsed state only) */}
         {!isOpen && (
           <span className="text-xs font-medium truncate max-w-[140px]">
-            {isEntityScoped ? scope.scopeLabel : 'Ship Chat'}
+            Ship Chat
           </span>
         )}
         {/* Green dot for entity-scoped context */}
