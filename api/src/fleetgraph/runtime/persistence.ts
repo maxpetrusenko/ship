@@ -278,6 +278,12 @@ export async function createApproval(
        action_type, target_entity_type, target_entity_id,
        description, payload, status, expires_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (alert_id) WHERE status = 'pending'
+     DO UPDATE SET
+       run_id = EXCLUDED.run_id,
+       description = EXCLUDED.description,
+       payload = EXCLUDED.payload,
+       updated_at = NOW()
      RETURNING *`,
     [
       approval.workspaceId,
