@@ -80,12 +80,18 @@ const loginLimiter = rateLimit({
 });
 
 // General API rate limit (100 req/min in prod, 1000 in dev)
+// Bearer token requests (FleetGraph internal, API tokens) are exempt — auth middleware
+// still validates the token downstream, so invalid tokens get 401'd regardless.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: isTestEnv ? 10000 : isDevEnv ? 1000 : 100, // High limit for tests/dev
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  skip: (req) => {
+    const authHeader = req.headers?.authorization;
+    return !!(authHeader && authHeader.startsWith('Bearer '));
+  },
 });
 
 

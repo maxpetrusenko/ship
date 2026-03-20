@@ -2,21 +2,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   configureFleetGraphData,
+  executeShipAction,
   fetchActiveSprints,
   fetchCoreContext,
   fetchParallelSignals,
 } from './fetchers.js';
 
 const mockClientGet = vi.fn();
+const mockClientPatch = vi.fn();
+const mockPoolQuery = vi.fn();
 
 describe('FleetGraph fetchers', () => {
 
   beforeEach(() => {
     mockClientGet.mockReset();
+    mockClientPatch.mockReset();
+    mockPoolQuery.mockReset();
     configureFleetGraphData(
-      {} as never,
+      { query: mockPoolQuery } as never,
       {
         get: mockClientGet,
+        patch: mockClientPatch,
+        post: vi.fn(),
       } as never,
     );
     mockClientGet.mockResolvedValue([]);
@@ -154,5 +161,51 @@ describe('FleetGraph fetchers', () => {
     );
     // Should not fetch issue history for workspace scope
     expect(mockClientGet).not.toHaveBeenCalledWith('/api/issues/ws-1/history');
+  });
+
+  describe('executeShipAction', () => {
+    it('throws when client.patch returns null for reassign_issue', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }); // member exists
+      mockClientPatch.mockResolvedValueOnce(null); // 404
+
+      await expect(
+        executeShipAction('ws-1', 'reassign_issue', 'issue', 'iss-missing', {
+          assignee_id: 'user-2',
+        }),
+      ).rejects.toThrow('not found (404)');
+    });
+
+    it('throws when assignee is not a member of the workspace', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [] }); // no member
+
+      await expect(
+        executeShipAction('ws-1', 'reassign_issue', 'issue', 'iss-1', {
+          assignee_id: 'user-nonexistent',
+        }),
+      ).rejects.toThrow('is not a member of workspace');
+    });
+
+    it('succeeds with valid user and non-null patch result', async () => {
+      mockPoolQuery.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }); // member exists
+      mockClientPatch.mockResolvedValueOnce({ id: 'iss-1', assignee_id: 'user-2' });
+
+      const result = await executeShipAction('ws-1', 'reassign_issue', 'issue', 'iss-1', {
+        assignee_id: 'user-2',
+      });
+
+      expect(result).toEqual({
+        success: true,
+        message: 'Issue reassigned to user-2',
+        payload: { assignee_id: 'user-2' },
+      });
+      expect(mockPoolQuery).toHaveBeenCalledWith(
+        expect.stringContaining('workspace_memberships'),
+        ['ws-1', 'user-2'],
+      );
+      expect(mockClientPatch).toHaveBeenCalledWith(
+        '/api/issues/iss-1',
+        { assignee_id: 'user-2' },
+      );
+    });
   });
 });

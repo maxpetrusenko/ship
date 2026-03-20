@@ -348,6 +348,59 @@ describe('createFleetGraphChatDataAccess', () => {
     });
   });
 
+  it('fetches workspace members from the database', async () => {
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [
+        { user_id: 'user-1', name: 'Alice', email: 'alice@example.com', role: 'admin' },
+        { user_id: 'user-2', name: 'Bob', email: 'bob@example.com', role: 'member' },
+      ],
+    });
+
+    const data = createFleetGraphChatDataAccess();
+    const result = await data.fetchWorkspaceMembers(
+      {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'workspace',
+        entityId: 'ws-1',
+        pageContext: null,
+      },
+      {},
+    );
+
+    expect(result).toEqual({
+      found: true,
+      members: [
+        { userId: 'user-1', name: 'Alice', email: 'alice@example.com', role: 'admin' },
+        { userId: 'user-2', name: 'Bob', email: 'bob@example.com', role: 'member' },
+      ],
+    });
+    expect(mockPoolQuery).toHaveBeenCalledWith(
+      expect.stringContaining('workspace_memberships'),
+      ['ws-1'],
+    );
+  });
+
+  it('returns empty members list for workspace with no active members', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+
+    const data = createFleetGraphChatDataAccess();
+    const result = await data.fetchWorkspaceMembers(
+      {
+        workspaceId: 'ws-empty',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'workspace',
+        entityId: 'ws-empty',
+        pageContext: null,
+      },
+      {},
+    );
+
+    expect(result).toEqual({ found: true, members: [] });
+  });
+
   it('grounds project context drift in related issue titles before claiming no drift', async () => {
     const projectRow = {
       id: 'proj-1',

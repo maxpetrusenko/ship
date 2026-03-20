@@ -24,6 +24,7 @@ const TOOL_METHODS = {
   fetch_related_documents: 'fetchRelatedDocuments',
   fetch_document_content: 'fetchDocumentContent',
   call_ship_api: 'callShipApi',
+  fetch_workspace_members: 'fetchWorkspaceMembers',
 } as const satisfies Record<FleetGraphChatToolName, keyof FleetGraphChatDataAccess>;
 
 const TOOL_DEFINITIONS: Record<FleetGraphChatToolName, ToolDefinition> = {
@@ -199,6 +200,21 @@ const TOOL_DEFINITIONS: Record<FleetGraphChatToolName, ToolDefinition> = {
       },
     },
     description: 'Call a read-only Ship REST endpoint as the current user. Use only GET requests for data not covered by dedicated FleetGraph tools.',
+  },
+  fetch_workspace_members: {
+    schema: {
+      type: 'function',
+      name: 'fetch_workspace_members',
+      description: 'Fetch active workspace members with their user IDs, names, and roles. Use this before proposing reassign_issue to get a valid assignee_id.',
+      strict: true,
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {},
+        required: [],
+      },
+    },
+    description: 'Fetch active workspace members with their user IDs, names, and roles.',
   },
 };
 

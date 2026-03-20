@@ -414,13 +414,21 @@ function getIssueState(ctx: Record<string, unknown>): string | null {
     return null;
   }
 
-  const properties = (entity as Record<string, unknown>).properties;
-  if (!properties || typeof properties !== 'object') {
-    return null;
+  const e = entity as Record<string, unknown>;
+
+  // API response flattens properties.state to top-level state
+  if (typeof e.state === 'string') {
+    return e.state;
   }
 
-  const state = (properties as Record<string, unknown>).state;
-  return typeof state === 'string' ? state : null;
+  // Fallback: raw DB row shape with nested properties JSONB
+  const properties = e.properties;
+  if (properties && typeof properties === 'object') {
+    const state = (properties as Record<string, unknown>).state;
+    if (typeof state === 'string') return state;
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +531,10 @@ export async function heuristicFilter(
   const updatedAtDays = state.entityType === 'issue' ? getIssueUpdatedAtDaysAgo(ctx) : null;
   const issueState = state.entityType === 'issue' ? getIssueState(ctx) : null;
   const issueCanGoStale = issueState === 'in_progress' || issueState === 'in_review';
-  const effectiveLastActivityDays = typeof lastActivityDays === 'number'
+  // Use updatedAtDays as primary signal; only override with lastActivityDays
+  // when it has real data (> 0). A default of 0 means "no activity entries"
+  // rather than "active today", so it should not suppress the stale signal.
+  const effectiveLastActivityDays = typeof lastActivityDays === 'number' && lastActivityDays > 0
     ? Math.min(lastActivityDays, updatedAtDays ?? lastActivityDays)
     : updatedAtDays;
   if (

@@ -15,7 +15,8 @@ export type FleetGraphChatToolName =
   | 'fetch_entity_drift'
   | 'fetch_related_documents'
   | 'fetch_document_content'
-  | 'call_ship_api';
+  | 'call_ship_api'
+  | 'fetch_workspace_members';
 
 export interface FleetGraphChatHintContext {
   route: string;
@@ -178,6 +179,10 @@ export interface FleetGraphChatDataAccess {
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
   callShipApi(
+    context: FleetGraphChatToolContext,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  fetchWorkspaceMembers(
     context: FleetGraphChatToolContext,
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;

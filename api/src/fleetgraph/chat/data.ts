@@ -443,5 +443,27 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
         bodyJson,
       });
     },
+
+    async fetchWorkspaceMembers(context: FleetGraphChatToolContext, _args: Record<string, unknown>) {
+      const result = await pool.query(
+        `SELECT u.id AS user_id, u.name, u.email, wm.role
+         FROM workspace_memberships wm
+         JOIN users u ON u.id = wm.user_id
+         WHERE wm.workspace_id = $1
+           AND wm.archived_at IS NULL
+         ORDER BY u.name`,
+        [context.workspaceId],
+      );
+
+      return {
+        found: true,
+        members: result.rows.map((row: { user_id: string; name: string; email: string; role: string }) => ({
+          userId: row.user_id,
+          name: row.name,
+          email: row.email,
+          role: row.role,
+        })),
+      };
+    },
   };
 }

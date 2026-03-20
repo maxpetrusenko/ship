@@ -556,38 +556,63 @@ export async function executeShipAction(
   try {
     switch (typedAction) {
       case 'reassign_issue': {
-        await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
+        // Validate assignee exists in workspace before PATCH
+        const pool = getPool();
+        const memberCheck = await pool.query(
+          'SELECT 1 FROM workspace_memberships WHERE workspace_id = $1 AND user_id = $2',
+          [workspaceId, payload.assignee_id],
+        );
+        if (memberCheck.rows.length === 0) {
+          throw new Error(`User ${payload.assignee_id} is not a member of workspace ${workspaceId}`);
+        }
+
+        const reassignResult = await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
           assignee_id: payload.assignee_id,
         });
+        if (reassignResult === null) {
+          throw new Error(`Target issue ${targetEntityId} not found (404)`);
+        }
         return { success: true, message: `Issue reassigned to ${payload.assignee_id}`, payload };
       }
 
       case 'change_state': {
-        await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
+        const stateResult = await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
           state: payload.state,
         });
+        if (stateResult === null) {
+          throw new Error(`Target issue ${targetEntityId} not found (404)`);
+        }
         return { success: true, message: `Issue state changed to ${payload.state}`, payload };
       }
 
       case 'escalate_priority': {
-        await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
+        const priorityResult = await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
           priority: payload.priority,
         });
+        if (priorityResult === null) {
+          throw new Error(`Target issue ${targetEntityId} not found (404)`);
+        }
         return { success: true, message: `Issue priority set to ${payload.priority}`, payload };
       }
 
       case 'flag_issue': {
-        await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
+        const flagResult = await client.patch(`/api/issues/${encodeURIComponent(targetEntityId)}`, {
           priority: 'urgent',
         });
+        if (flagResult === null) {
+          throw new Error(`Target issue ${targetEntityId} not found (404)`);
+        }
         return { success: true, message: 'Issue flagged as urgent', payload };
       }
 
       case 'add_comment': {
-        await client.post(`/api/comments`, {
+        const commentResult = await client.post(`/api/comments`, {
           document_id: targetEntityId,
           content: payload.content,
         });
+        if (commentResult === null) {
+          throw new Error(`Target document ${targetEntityId} not found (404)`);
+        }
         return { success: true, message: 'Comment added', payload };
       }
 
