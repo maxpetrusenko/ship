@@ -9,16 +9,20 @@ export type FleetGraphChatToolName =
   | 'fetch_issue_context'
   | 'fetch_sprint_context'
   | 'fetch_project_context'
+  | 'fetch_project_summary'
+  | 'fetch_sprint_summary'
   | 'fetch_workspace_signals'
   | 'fetch_entity_drift'
   | 'fetch_related_documents'
-  | 'fetch_document_content';
+  | 'fetch_document_content'
+  | 'call_ship_api';
 
 export interface FleetGraphChatHintContext {
   route: string;
   surface: FleetGraphPageContext['surface'];
   documentId?: string;
   title?: string;
+  documentType?: string;
   visibleContentText?: string;
   tab?: string;
   tabLabel?: string;
@@ -149,6 +153,14 @@ export interface FleetGraphChatDataAccess {
     context: FleetGraphChatToolContext,
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
+  fetchProjectSummary(
+    context: FleetGraphChatToolContext,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  fetchSprintSummary(
+    context: FleetGraphChatToolContext,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
   fetchWorkspaceSignals(
     context: FleetGraphChatToolContext,
     args: Record<string, unknown>,
@@ -162,6 +174,10 @@ export interface FleetGraphChatDataAccess {
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
   fetchDocumentContent(
+    context: FleetGraphChatToolContext,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  callShipApi(
     context: FleetGraphChatToolContext,
     args: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;

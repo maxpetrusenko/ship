@@ -96,4 +96,70 @@ describe('RetroQualityBanner', () => {
     expect(screen.queryByText('25%')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).includes('/api/documents/doc-2'))).toBe(true);
   });
+
+  it('shows unavailable state when AI status is false', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.endsWith('/api/ai/status')) {
+        return jsonResponse({ available: false });
+      }
+      throw new Error(`Unexpected fetch call: GET ${url}`);
+    });
+
+    global.fetch = fetchMock as typeof fetch;
+
+    render(
+      <RetroQualityBanner
+        documentId="doc-1"
+        editorContent={null}
+        planContent={null}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('AI quality check unavailable')).toBeInTheDocument();
+    });
+  });
+
+  it('shows unavailable state when analysis returns ai_unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method || 'GET';
+
+      if (url.endsWith('/api/ai/status')) {
+        return jsonResponse({ available: true });
+      }
+
+      if (method === 'GET' && url.includes('/api/documents/doc-1')) {
+        return jsonResponse({
+          content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Retrospective text' }] }] },
+          properties: {},
+        });
+      }
+
+      if (method === 'POST' && url.endsWith('/api/ai/analyze-retro')) {
+        return jsonResponse({ error: 'ai_unavailable' });
+      }
+
+      if (method === 'GET' && url.includes('/api/weekly-plans')) {
+        return jsonResponse([]);
+      }
+
+      throw new Error(`Unexpected fetch call: ${method} ${url}`);
+    });
+
+    global.fetch = fetchMock as typeof fetch;
+
+    render(
+      <RetroQualityBanner
+        documentId="doc-1"
+        editorContent={{ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Changed retro text' }] }] }}
+        planContent={{ type: 'doc', content: [] }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('AI quality check unavailable')).toBeInTheDocument();
+    });
+  });
 });

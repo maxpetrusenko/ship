@@ -96,6 +96,21 @@ const WORKLOAD_COLORS = {
   excessive: 'text-red-400 bg-red-500/10 border-red-500/30',
 };
 
+function QualityUnavailableBanner() {
+  return (
+    <div className="mb-4 pl-8">
+      <div className="w-full rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <svg className="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="text-sm text-amber-200">AI quality check unavailable</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PlanQualityBanner({
   documentId,
   editorContent,
@@ -108,6 +123,7 @@ export function PlanQualityBanner({
   const [analysis, setAnalysisRaw] = useState<PlanAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const [analysisUnavailable, setAnalysisUnavailable] = useState(false);
   const lastContentRef = useRef<string>('');
   const requestIdRef = useRef(0);
   const persistedHashRef = useRef<string | null>(null);
@@ -129,6 +145,7 @@ export function PlanQualityBanner({
     persistedHashRef.current = null;
     setLoading(false);
     setAiAvailable(null);
+    setAnalysisUnavailable(false);
     setAnalysis(null);
 
     quietGet('/api/ai/status')
@@ -190,12 +207,20 @@ export function PlanQualityBanner({
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (thisRequestId !== requestIdRef.current) return;
-        if (data && !data.error) {
+        if (data?.error) {
+          setAnalysisUnavailable(true);
+          setAnalysis(null);
+          return;
+        }
+        if (data) {
           setAnalysis(data);
           persistAnalysis(data);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (thisRequestId !== requestIdRef.current) return;
+        setAnalysisUnavailable(true);
+      })
       .finally(() => {
         if (thisRequestId !== requestIdRef.current) return;
         setLoading(false);
@@ -224,7 +249,9 @@ export function PlanQualityBanner({
     };
   }, [aiAvailable, documentId, analysis, runAnalysis]);
 
-  if (aiAvailable === false) return null;
+  if (!analysis && (aiAvailable === false || analysisUnavailable)) {
+    return <QualityUnavailableBanner />;
+  }
 
   // Skeleton / waiting state — show before first analysis
   if (!analysis && !loading) {
@@ -319,6 +346,7 @@ export function RetroQualityBanner({
   const [analysis, setAnalysisRaw] = useState<RetroAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const [analysisUnavailable, setAnalysisUnavailable] = useState(false);
   const lastContentRef = useRef<string>('');
   const requestIdRef = useRef(0);
   const persistedHashRef = useRef<string | null>(null);
@@ -349,6 +377,7 @@ export function RetroQualityBanner({
     persistedHashRef.current = null;
     setLoading(false);
     setAiAvailable(null);
+    setAnalysisUnavailable(false);
     setAnalysis(null);
     setPlanContent(externalPlanContentRef.current);
 
@@ -434,12 +463,20 @@ export function RetroQualityBanner({
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (thisRequestId !== requestIdRef.current) return;
-        if (data && !data.error) {
+        if (data?.error) {
+          setAnalysisUnavailable(true);
+          setAnalysis(null);
+          return;
+        }
+        if (data) {
           setAnalysis(data);
           persistAnalysis(data);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (thisRequestId !== requestIdRef.current) return;
+        setAnalysisUnavailable(true);
+      })
       .finally(() => {
         if (thisRequestId !== requestIdRef.current) return;
         setLoading(false);
@@ -468,7 +505,9 @@ export function RetroQualityBanner({
     };
   }, [aiAvailable, documentId, analysis, planContent, runAnalysis]);
 
-  if (aiAvailable === false) return null;
+  if (!analysis && (aiAvailable === false || analysisUnavailable)) {
+    return <QualityUnavailableBanner />;
+  }
 
   if (!analysis && !loading) {
     return (

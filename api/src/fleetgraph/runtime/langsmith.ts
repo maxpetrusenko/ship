@@ -3,7 +3,17 @@ import { Client } from 'langsmith';
 export type LangSmithEnv = Record<string, string | undefined>;
 
 export function getLangSmithApiKey(env: LangSmithEnv = process.env): string | null {
-  return env.LANGSMITH_API_KEY ?? env.LANGCHAIN_API_KEY ?? null;
+  const modernKey = env.LANGSMITH_API_KEY?.trim();
+  if (modernKey) {
+    return modernKey;
+  }
+
+  const legacyKey = env.LANGCHAIN_API_KEY?.trim();
+  if (legacyKey) {
+    return legacyKey;
+  }
+
+  return null;
 }
 
 export function isLangSmithTracingRequested(env: LangSmithEnv = process.env): boolean {
@@ -11,7 +21,7 @@ export function isLangSmithTracingRequested(env: LangSmithEnv = process.env): bo
 }
 
 export function canUseLangSmithTracing(env: LangSmithEnv = process.env): boolean {
-  return isLangSmithTracingRequested(env) && typeof getLangSmithApiKey(env) === 'string';
+  return isLangSmithTracingRequested(env) && getLangSmithApiKey(env) !== null;
 }
 
 export function getLangSmithProjectName(env: LangSmithEnv = process.env): string | null {
@@ -60,7 +70,16 @@ export async function resolveLangSmithRunUrl(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const existingSharedUrl = await langSmithClient.readRunSharedLink(runId);
+      let existingSharedUrl: string | undefined;
+      try {
+        existingSharedUrl = await langSmithClient.readRunSharedLink(runId);
+      } catch (err) {
+        const status = getErrorStatus(err);
+        if (status !== 404) {
+          throw err;
+        }
+      }
+
       if (existingSharedUrl) {
         return existingSharedUrl;
       }

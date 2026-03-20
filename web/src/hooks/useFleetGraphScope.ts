@@ -23,6 +23,17 @@ export interface FleetGraphScope {
   scopeLabel: string;
 }
 
+const SCOPE_TYPE_LABELS: Record<FleetGraphScopeType, string> = {
+  issue: 'Issue',
+  project: 'Project',
+  sprint: 'Sprint',
+  workspace: 'Workspace',
+};
+
+function formatScopeLabel(scopeType: FleetGraphScopeType, value: string): string {
+  return `${SCOPE_TYPE_LABELS[scopeType]}: ${value}`;
+}
+
 function extractUnifiedDocumentId(pathname: string): string | null {
   const match = pathname.match(/^\/documents\/([^/]+)/);
   return match?.[1] ?? null;
@@ -114,7 +125,7 @@ export function useFleetGraphScope(): FleetGraphScope {
       console.log('[FleetGraph:Scope] docContext hit', { currentDocumentType, entityType: entityType ?? 'UNMAPPED' });
       if (entityType) {
         const title = lookupTitle(entityType, currentDocumentId);
-        const label = title || `${entityType} ${currentDocumentId.slice(0, 8)}`;
+        const label = formatScopeLabel(entityType, title || currentDocumentId.slice(0, 8));
         return {
           scopeType: entityType,
           scopeId: currentDocumentId,
@@ -127,7 +138,7 @@ export function useFleetGraphScope(): FleetGraphScope {
     const routeScope = parseScopeFromPath(location.pathname);
     if (routeScope) {
       const title = lookupTitle(routeScope.entityType, routeScope.entityId);
-      const label = title || `${routeScope.entityType} ${routeScope.entityId.slice(0, 8)}`;
+      const label = formatScopeLabel(routeScope.entityType, title || routeScope.entityId.slice(0, 8));
       return {
         scopeType: routeScope.entityType,
         scopeId: routeScope.entityId,
@@ -140,7 +151,7 @@ export function useFleetGraphScope(): FleetGraphScope {
       const inferredEntityType = inferEntityTypeFromDocumentId(unifiedDocumentId);
       if (inferredEntityType) {
         const title = lookupTitle(inferredEntityType, unifiedDocumentId);
-        const label = title || `${inferredEntityType} ${unifiedDocumentId.slice(0, 8)}`;
+        const label = formatScopeLabel(inferredEntityType, title || unifiedDocumentId.slice(0, 8));
         return {
           scopeType: inferredEntityType,
           scopeId: unifiedDocumentId,
@@ -154,7 +165,7 @@ export function useFleetGraphScope(): FleetGraphScope {
     return {
       scopeType: 'workspace' as FleetGraphScopeType,
       scopeId: currentWorkspace?.id ?? 'default',
-      scopeLabel: currentWorkspace?.name ?? 'Workspace',
+      scopeLabel: formatScopeLabel('workspace', currentWorkspace?.name ?? currentWorkspace?.id ?? 'Workspace'),
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDocumentType, currentDocumentId, location.pathname, currentWorkspace, issues, projects, weeks]);

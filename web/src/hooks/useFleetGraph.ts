@@ -5,15 +5,18 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '@/lib/api';
+import { issueKeys } from '@/hooks/useIssuesQuery';
 import type {
   FleetGraphEntityType,
   FleetGraphAlertsResponse,
   FleetGraphAlertResolveRequest,
   FleetGraphOnDemandResponse,
+  FleetGraphDemoSeedResponse,
   FleetGraphChatResponse,
   FleetGraphChatThreadResponse,
   FleetGraphCreateChatThreadResponse,
   FleetGraphStatusResponse,
+  FleetGraphModalFeedResponse,
   FleetGraphPageContext,
 } from '@ship/shared';
 
@@ -34,7 +37,44 @@ export const fleetgraphKeys = {
   status: () => [...fleetgraphKeys.all, 'status'] as const,
   thread: (entityType?: string, entityId?: string) =>
     [...fleetgraphKeys.all, 'thread', entityType, entityId] as const,
+  modalFeed: () => [...fleetgraphKeys.all, 'modal-feed'] as const,
 };
+
+async function buildResponseError(response: Response, fallback: string): Promise<Error> {
+  let detail = '';
+
+  if ((response.headers.get('content-type') ?? '').includes('application/json')) {
+    try {
+      const payload = await response.clone().json() as {
+        error?: string | { message?: string };
+      };
+      if (typeof payload.error === 'string') {
+        detail = payload.error;
+      } else if (typeof payload.error?.message === 'string') {
+        detail = payload.error.message;
+      }
+    } catch {
+      // Ignore JSON parse failures and fall back to text below.
+    }
+  }
+
+  if (!detail) {
+    try {
+      detail = (await response.clone().text()).trim();
+    } catch {
+      detail = '';
+    }
+  }
+
+  const statusLabel = response.statusText
+    ? `${response.status} ${response.statusText}`
+    : String(response.status);
+  return new Error(
+    detail
+      ? `${fallback} (${statusLabel}): ${detail}`
+      : `${fallback} (${statusLabel})`,
+  );
+}
 
 // -------------------------------------------------------------------------
 // Queries
@@ -74,6 +114,23 @@ export function useFleetGraphStatus() {
   });
 }
 
+/**
+ * Server-prioritized FleetGraph items for the ActionItemsModal.
+ * Invalidated on fleetgraph:alert events and resolve actions.
+ */
+export function useFleetGraphModalFeed() {
+  return useQuery<FleetGraphModalFeedResponse>({
+    queryKey: fleetgraphKeys.modalFeed(),
+    queryFn: async () => {
+      const res = await apiGet('/api/fleetgraph/modal-feed');
+      if (!res.ok) throw new Error('Failed to fetch modal feed');
+      return res.json();
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
 // -------------------------------------------------------------------------
 // Mutations
 // -------------------------------------------------------------------------
@@ -109,6 +166,32 @@ export function useFleetGraphOnDemand() {
   });
 }
 
+export function useFleetGraphSeedDemoFlow() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    FleetGraphDemoSeedResponse,
+    Error,
+    { entityType: FleetGraphEntityType; entityId: string }
+  >({
+    mutationFn: async (params) => {
+      const res = await apiPost('/api/fleetgraph/demo/seed-flow', params);
+      if (!res.ok) {
+        throw await buildResponseError(res, 'FleetGraph demo seed failed');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.all });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.allAlerts() });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.modalFeed() });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.status() });
+      queryClient.invalidateQueries({ queryKey: [...fleetgraphKeys.all, 'thread'] });
+      queryClient.refetchQueries({ queryKey: [...fleetgraphKeys.all, 'thread'], type: 'active' });
+    },
+  });
+}
+
 export function useFleetGraphChat() {
   return useMutation<
     FleetGraphChatResponse,
@@ -124,7 +207,9 @@ export function useFleetGraphChat() {
   >({
     mutationFn: async (params) => {
       const res = await apiPost('/api/fleetgraph/chat', params);
-      if (!res.ok) throw new Error('Failed to send chat message');
+      if (!res.ok) {
+        throw await buildResponseError(res, 'FleetGraph chat request failed');
+      }
       return res.json();
     },
   });
@@ -182,7 +267,14 @@ export function useFleetGraphResolve() {
   return useMutation<
     { success: boolean },
     Error,
-    { alertId: string; outcome: FleetGraphAlertResolveRequest['outcome']; snoozeDurationMinutes?: number; reason?: string }
+    {
+      alertId: string;
+      outcome: FleetGraphAlertResolveRequest['outcome'];
+      snoozeDurationMinutes?: number;
+      reason?: string;
+      targetEntityType?: FleetGraphEntityType;
+      targetEntityId?: string;
+    }
   >({
     mutationFn: async ({ alertId, outcome, snoozeDurationMinutes, reason }) => {
       const res = await apiPost(`/api/fleetgraph/alerts/${alertId}/resolve`, {
@@ -193,8 +285,19 @@ export function useFleetGraphResolve() {
       if (!res.ok) throw new Error('Failed to resolve alert');
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: fleetgraphKeys.all });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.allAlerts() });
+      queryClient.invalidateQueries({ queryKey: fleetgraphKeys.modalFeed() });
+
+      if (variables.targetEntityId) {
+        queryClient.invalidateQueries({ queryKey: ['document', variables.targetEntityId] });
+      }
+
+      if (variables.targetEntityType === 'issue' && variables.targetEntityId) {
+        queryClient.invalidateQueries({ queryKey: issueKeys.detail(variables.targetEntityId) });
+        queryClient.invalidateQueries({ queryKey: issueKeys.lists() });
+      }
     },
   });
 }

@@ -1,10 +1,12 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import crypto from 'crypto';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import { loadProductionSecrets } from '../config/ssm.js';
 import { loadEnvFiles } from '../config/env.js';
+import { ensureDatabaseSchema } from './bootstrap.js';
 import { WELCOME_DOCUMENT_TITLE, WELCOME_DOCUMENT_CONTENT } from './welcomeDocument.js';
 import { getDatabaseSslConfig } from './ssl.js';
 
@@ -49,23 +51,12 @@ async function seed() {
   console.log(`   Database host: ${dbHost}`);
 
   try {
-    // Run schema
-    const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
-    try {
-      await pool.query(schema);
-    } catch (error) {
-      if (!(error instanceof Error) || !('code' in error) || error.code !== '23505') {
-        throw error;
-      }
-
-      const message = 'detail' in error && typeof error.detail === 'string' ? error.detail : '';
-      if (!message.includes('(extname)=(pg_trgm)')) {
-        throw error;
-      }
-
-      console.log('ℹ️  pg_trgm already registered during schema bootstrap, continuing');
-    }
-    console.log('✅ Schema created');
+    const appliedNow = await ensureDatabaseSchema(pool, console);
+    console.log(
+      appliedNow.length === 0
+        ? '✅ Schema ready'
+        : `✅ Schema ready with ${appliedNow.length} pending migration(s) applied`,
+    );
 
     // Check if workspace exists
     const existingWorkspace = await pool.query(
@@ -144,6 +135,27 @@ async function seed() {
       [workspaceId]
     );
     console.log('✅ Set dev@ship.local as super-admin');
+
+    // Create FleetGraph API token for dev user (matches FLEETGRAPH_API_TOKEN in .env.local)
+    const fleetgraphToken = process.env.FLEETGRAPH_API_TOKEN;
+    if (fleetgraphToken) {
+      const devUser = await pool.query(
+        "SELECT id FROM users WHERE email = 'dev@ship.local'"
+      );
+      if (devUser.rows[0]) {
+        const tokenHash = crypto.createHash('sha256').update(fleetgraphToken).digest('hex');
+        const tokenPrefix = fleetgraphToken.slice(0, 12);
+        await pool.query(
+          `INSERT INTO api_tokens (user_id, workspace_id, name, token_hash, token_prefix)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_id, workspace_id, name) DO UPDATE SET token_hash = $4, token_prefix = $5`,
+          [devUser.rows[0].id, workspaceId, 'FleetGraph Agent', tokenHash, tokenPrefix]
+        );
+        console.log('✅ FleetGraph API token seeded');
+      }
+    } else {
+      console.log('ℹ️  FLEETGRAPH_API_TOKEN not set, skipping API token seed');
+    }
 
     // Create workspace memberships and Person documents for all users
     // Note: These are independent - no coupling via person_document_id
@@ -1252,6 +1264,20 @@ async function seed() {
     }
     if (weeklyRetrosCreated > 0) {
       console.log(`✅ Created ${weeklyRetrosCreated} weekly retros`);
+    }
+
+    // Sync FLEETGRAPH_WORKSPACE_ID in .env.local so it matches the seeded workspace
+    const envLocalPath = join(__dirname, '../../.env.local');
+    if (existsSync(envLocalPath)) {
+      let envContent = readFileSync(envLocalPath, 'utf-8');
+      const wsIdRegex = /^FLEETGRAPH_WORKSPACE_ID=.*$/m;
+      if (wsIdRegex.test(envContent)) {
+        envContent = envContent.replace(wsIdRegex, `FLEETGRAPH_WORKSPACE_ID=${workspaceId}`);
+      } else {
+        envContent = envContent.trimEnd() + `\nFLEETGRAPH_WORKSPACE_ID=${workspaceId}\n`;
+      }
+      writeFileSync(envLocalPath, envContent);
+      console.log(`✅ Synced FLEETGRAPH_WORKSPACE_ID=${workspaceId} in .env.local`);
     }
 
     console.log('');

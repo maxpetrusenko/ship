@@ -54,6 +54,7 @@ export function useFleetGraphPageContext(scope: FleetGraphScope): FleetGraphPage
       surface,
       documentId: scope.scopeType !== 'workspace' ? scope.scopeId : undefined,
       title: scope.scopeLabel,
+      documentType: scope.scopeType !== 'workspace' ? scope.scopeType : undefined,
       ...tabContext,
     };
   }, [location.pathname, scope.scopeType, scope.scopeId, scope.scopeLabel]);

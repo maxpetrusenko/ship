@@ -22,6 +22,14 @@ export interface ProjectRow {
   content: unknown;
 }
 
+export interface ProjectIssueRow {
+  id: string;
+  title: string;
+  state: string | null;
+  priority: string | null;
+  ticket_number: number | null;
+}
+
 export interface IssueHistoryRow {
   field: string;
   old_value: unknown;
@@ -78,6 +86,16 @@ export function summarizeIssueHistory(history: IssueHistoryRow[], limit = 5) {
 
 export function summarizeIssueChildren(children: IssueChildRow[], limit = 5) {
   return children.slice(0, limit).map((item) => ({
+    id: item.id,
+    title: item.title,
+    state: item.state,
+    priority: item.priority,
+    displayId: item.ticket_number ? `#${item.ticket_number}` : null,
+  }));
+}
+
+export function summarizeProjectIssues(issues: ProjectIssueRow[], limit = 8) {
+  return issues.slice(0, limit).map((item) => ({
     id: item.id,
     title: item.title,
     state: item.state,
@@ -206,22 +224,58 @@ export function detectIssueDrift(issue: IssueRow, history: IssueHistoryRow[]) {
   };
 }
 
-export function detectProjectDrift(project: ProjectRow) {
+export function detectProjectDrift(project: ProjectRow, issueTitles: ProjectIssueRow[] = []) {
   const properties = asRecord(project.properties);
   const title = compactText(project.title, 120);
   const contentText = summarizeDocumentContent(project.content, 300);
   const plan = compactText(properties.plan, 300);
+  const topicTokens = new Set(tokenizeProjectTopicText([title, plan, contentText].filter(Boolean).join(' ')));
+
+  const alignedIssueTitles: string[] = [];
+  const offTopicIssueTitles: string[] = [];
+  for (const issue of issueTitles) {
+    const issueTitle = compactText(issue.title, 120);
+    if (!issueTitle) continue;
+    const issueTokens = tokenizeProjectTopicText(issueTitle);
+    if (issueTokens.length === 0 || topicTokens.size === 0) continue;
+    const overlap = issueTokens.filter((token) => topicTokens.has(token));
+    if (overlap.length > 0) {
+      alignedIssueTitles.push(issueTitle);
+    } else {
+      offTopicIssueTitles.push(issueTitle);
+    }
+  }
+
+  const offTopicRatio = issueTitles.length > 0
+    ? offTopicIssueTitles.length / issueTitles.length
+    : 0;
+  const hasStrongOffTopicSignal = offTopicIssueTitles.length >= 2 && offTopicRatio >= 0.5;
 
   return {
-    scopeDrift: false,
-    reason: null,
+    scopeDrift: hasStrongOffTopicSignal,
+    reason: hasStrongOffTopicSignal ? 'related_issue_topic_mismatch' : null,
     evidence: {
       title,
       content: contentText,
       plan,
+      alignedIssueTitles,
+      offTopicIssueTitles,
     },
   };
 }
+
+function tokenizeProjectTopicText(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !PROJECT_TOPIC_STOP_WORDS.has(token));
+}
+
+const PROJECT_TOPIC_STOP_WORDS = new Set([
+  'about', 'costs', 'clearly', 'defects', 'detailed', 'drift',
+  'fixes', 'goals', 'improve', 'misalignment', 'project', 'reduce', 'retention',
+  'scope', 'signals', 'stability', 'support', 'there', 'currently',
+]);
 
 export function normalizeChatPageContext(pageContext: FleetGraphChatHintContext | null | undefined): FleetGraphChatHintContext | null {
   if (!pageContext) return null;
@@ -231,6 +285,7 @@ export function normalizeChatPageContext(pageContext: FleetGraphChatHintContext 
     surface: pageContext.surface,
     documentId: pageContext.documentId,
     title: compactText(pageContext.title, 120) ?? undefined,
+    documentType: compactText(pageContext.documentType, 40) ?? undefined,
     visibleContentText: compactText(pageContext.visibleContentText, 2000) ?? undefined,
     tab: pageContext.tab,
     tabLabel: compactText(pageContext.tabLabel, 80) ?? undefined,

@@ -2,7 +2,7 @@ import { pool } from '../../db/client.js';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../../middleware/visibility.js';
 import { loadContentFromYjsState } from '../../utils/yjsConverter.js';
 import type { FleetGraphChatToolContext } from './types.js';
-import { asRecord, type IssueChildRow, type IssueHistoryRow, type IssueRow, type ProjectRow, type RelatedDocumentRow } from './data-utils.js';
+import { asRecord, type IssueChildRow, type IssueHistoryRow, type IssueRow, type ProjectIssueRow, type ProjectRow, type RelatedDocumentRow } from './data-utils.js';
 
 export interface VisibilityContext {
   isAdmin: boolean;
@@ -108,6 +108,34 @@ export async function loadVisibleProject(
   );
 
   return result.rows[0] ?? null;
+}
+
+export async function loadProjectIssues(
+  context: FleetGraphChatToolContext,
+  projectId: string,
+  visibility: VisibilityContext,
+): Promise<ProjectIssueRow[]> {
+  const result = await pool.query(
+    `SELECT d.id,
+            d.title,
+            d.properties->>'state' as state,
+            d.properties->>'priority' as priority,
+            d.ticket_number
+     FROM documents d
+     JOIN document_associations da
+       ON da.document_id = d.id
+      AND da.related_id = $1
+      AND da.relationship_type = 'project'
+     WHERE d.workspace_id = $2
+       AND d.document_type = 'issue'
+       AND d.deleted_at IS NULL
+       AND d.archived_at IS NULL
+       AND ${VISIBILITY_FILTER_SQL('d', '$3', '$4')}
+     ORDER BY d.updated_at DESC`,
+    [projectId, context.workspaceId, context.userId, visibility.isAdmin],
+  );
+
+  return result.rows;
 }
 
 export async function loadVisibleDocumentContent(

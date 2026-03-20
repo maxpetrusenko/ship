@@ -9,6 +9,8 @@ import {
   formatActionItemDueDate,
   getWeeklyDocumentKindForAccountabilityType,
 } from '@/lib/accountability';
+import { useFleetGraphModalFeed } from '@/hooks/useFleetGraph';
+import { FleetGraphModalSection } from '@/components/fleetgraph/FleetGraphModalSection';
 
 const ACCOUNTABILITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   standup: (
@@ -124,6 +126,7 @@ interface ActionItemsModalProps {
 export function ActionItemsModal({ open, onClose }: ActionItemsModalProps) {
   const navigate = useNavigate();
   const { data, isLoading } = useActionItemsQuery();
+  const { data: fleetGraphData } = useFleetGraphModalFeed();
   const [navigatingItemId, setNavigatingItemId] = useState<string | null>(null);
 
   const handleItemClick = async (item: ActionItem) => {
@@ -159,8 +162,9 @@ export function ActionItemsModal({ open, onClose }: ActionItemsModalProps) {
   };
 
   const items = data?.items ?? [];
+  const fleetGraphCount = fleetGraphData?.items?.length ?? 0;
   const overdueCount = items.filter(item => item.days_overdue >= 0).length;
-  const totalCount = items.length;
+  const totalCount = items.length + fleetGraphCount;
 
   return (
     <Dialog.Root open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -235,6 +239,9 @@ export function ActionItemsModal({ open, onClose }: ActionItemsModalProps) {
                 ))}
               </div>
             )}
+
+            {/* FleetGraph section (below accountability, above footer) */}
+            <FleetGraphModalSection onClose={onClose} />
           </div>
 
           {/* Footer */}

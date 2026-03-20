@@ -18,11 +18,12 @@ import { test as base } from '@playwright/test';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { spawn, ChildProcess } from 'child_process';
 import { Pool } from 'pg';
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import path from 'path';
 import getPort, { portNumbers } from 'get-port';
 import bcrypt from 'bcryptjs';
 import os from 'os';
+import { ensureDatabaseSchema } from '../../api/src/db/bootstrap.js';
 
 /**
  * Get port for a worker with collision avoidance.
@@ -277,42 +278,7 @@ async function runMigrations(dbUrl: string): Promise<void> {
   const pool = new Pool({ connectionString: dbUrl });
 
   try {
-    // Step 1: Run schema.sql for initial setup
-    const schemaPath = path.join(PROJECT_ROOT, 'api/src/db/schema.sql');
-    const schema = readFileSync(schemaPath, 'utf-8');
-    await pool.query(schema);
-
-    // Step 2: Create migrations tracking table
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at TIMESTAMPTZ DEFAULT now()
-      )
-    `);
-
-    // Step 3: Mark all migrations as applied since schema.sql represents the full current state.
-    // schema.sql includes all table definitions from all migrations, so running migrations
-    // again would fail on CREATE TABLE statements that don't use IF NOT EXISTS.
-    const migrationsDir = path.join(PROJECT_ROOT, 'api/src/db/migrations');
-    let migrationFiles: string[] = [];
-
-    try {
-      migrationFiles = readdirSync(migrationsDir)
-        .filter((f) => f.endsWith('.sql'))
-        .sort();
-    } catch {
-      // No migrations directory
-    }
-
-    for (const file of migrationFiles) {
-      const version = file.replace('.sql', '');
-      await pool.query(
-        'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
-        [version]
-      );
-    }
-
-    // Step 5: Seed minimal test data
+    await ensureDatabaseSchema(pool);
     await seedMinimalTestData(pool);
   } finally {
     await pool.end();

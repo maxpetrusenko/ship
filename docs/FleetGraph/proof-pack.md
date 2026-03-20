@@ -5,7 +5,7 @@ Date: 2026-03-17
 ## Closed in this pass
 
 - Workspace scope is first class end to end. The launcher and chat send `entityType: "workspace"` instead of aliasing to `project`.
-- Proactive scheduler fans out across sprint entities and issue entities, so stale issue and scope drift now have a real scheduled path.
+- Proactive scheduler fans out across sprint entities, live sprint issues, and linked project rollups, so stale issue and upstream scope drift have a real scheduled path.
 - Manager missed-standup proof is deterministic. The route test freezes time and asserts the overdue path directly.
 - Docs now match runtime on notification center status, proactive broadcast semantics, and HITL pause/resume wording.
 

@@ -14,6 +14,7 @@ import {
   loadExistingSprintReview,
   loadIssueChildren,
   loadIssueHistory,
+  loadProjectIssues,
   loadProjectRetroContext,
   loadSprintBase,
   loadSprintIssues,
@@ -24,7 +25,12 @@ import {
   loadVisibleProject,
 } from './data-queries.js';
 import {
+  loadProjectIssuesForSummary,
+  loadProjectSprintsForSummary,
+} from './summary-queries.js';
+import {
   asRecord,
+  compactText,
   detectIssueDrift,
   detectProjectDrift,
   summarizeAccountability,
@@ -33,8 +39,15 @@ import {
   summarizeIssueChildren,
   summarizeIssueHistory,
   summarizeManagerItems,
+  summarizeProjectIssues,
   summarizeSprintContext,
 } from './data-utils.js';
+import {
+  buildAssigneeLoadSummary,
+  buildIssueStateCounts,
+  summarizeSprintRows,
+} from './rollups.js';
+import { callShipApiAsUser } from './user-api.js';
 
 export { normalizeChatPageContext } from './data-utils.js';
 
@@ -158,9 +171,10 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
     async fetchProjectContext(context: FleetGraphChatToolContext, args: Record<string, unknown>) {
       const projectId = typeof args.projectId === 'string' && args.projectId.trim() ? args.projectId : context.entityId;
       const visibility = await loadVisibility(context);
-      const [project, retroContext] = await Promise.all([
+      const [project, retroContext, issues] = await Promise.all([
         loadVisibleProject(context, projectId, visibility),
         loadProjectRetroContext(context, projectId, visibility).catch(() => null),
+        loadProjectIssues(context, projectId, visibility).catch(() => []),
       ]);
 
       if (!project) {
@@ -180,8 +194,83 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
           accountableId: properties.accountable_id ?? null,
           status: properties.status ?? null,
         },
+        relatedIssues: summarizeProjectIssues(issues),
         retroContext: retroContext ? summarizeSprintContext(retroContext) : null,
-        drift: detectProjectDrift(project),
+        drift: detectProjectDrift(project, issues),
+      };
+    },
+
+    async fetchProjectSummary(context: FleetGraphChatToolContext, args: Record<string, unknown>) {
+      const projectId = typeof args.projectId === 'string' && args.projectId.trim() ? args.projectId : context.entityId;
+      const visibility = await loadVisibility(context);
+      const project = await loadVisibleProject(context, projectId, visibility);
+      if (!project) {
+        return { found: false, entityType: 'project', projectId };
+      }
+
+      const [issues, sprints] = await Promise.all([
+        loadProjectIssuesForSummary(context, projectId, visibility),
+        loadProjectSprintsForSummary(context, projectId, visibility),
+      ]);
+      const counts = buildIssueStateCounts(issues);
+      const loadSummary = buildAssigneeLoadSummary(issues);
+
+      return {
+        found: true,
+        entityType: 'project',
+        project: {
+          id: project.id,
+          title: project.title,
+          plan: compactText(asRecord(project.properties).plan, 240),
+        },
+        counts,
+        sprintCount: sprints.length,
+        sprints: summarizeSprintRows(sprints).slice(0, 8),
+        relatedIssues: summarizeProjectIssues(issues).slice(0, 8),
+        assigneeLoads: loadSummary.assigneeLoads.slice(0, 8),
+        overloadedAssignees: loadSummary.overloadedAssignees,
+        overloadThreshold: loadSummary.overloadThreshold,
+        drift: detectProjectDrift(project, issues),
+      };
+    },
+
+    async fetchSprintSummary(context: FleetGraphChatToolContext, args: Record<string, unknown>) {
+      const sprintId = typeof args.sprintId === 'string' && args.sprintId.trim() ? args.sprintId : context.entityId;
+      const visibility = await loadVisibility(context);
+      const sprint = await loadSprintBase(context, sprintId, visibility);
+      if (!sprint) {
+        return { found: false, entityType: 'sprint', sprintId };
+      }
+
+      const issues = await loadSprintIssues(context, sprintId, visibility).catch(() => []);
+      const counts = buildIssueStateCounts(issues);
+      const loadSummary = buildAssigneeLoadSummary(issues);
+
+      return {
+        found: true,
+        entityType: 'sprint',
+        sprint: {
+          id: sprint.sprint_id,
+          title: sprint.sprint_title,
+          sprintNumber: sprint.sprint_number,
+          status: sprint.sprint_status,
+        },
+        project: sprint.project_id
+          ? {
+              id: sprint.project_id,
+              title: sprint.project_name,
+            }
+          : null,
+        program: sprint.program_id
+          ? {
+              id: sprint.program_id,
+              title: sprint.program_name,
+            }
+          : null,
+        counts,
+        assigneeLoads: loadSummary.assigneeLoads.slice(0, 8),
+        overloadedAssignees: loadSummary.overloadedAssignees,
+        overloadThreshold: loadSummary.overloadThreshold,
       };
     },
 
@@ -272,11 +361,13 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
         if (!project) {
           return { found: false, entityType, entityId };
         }
+        const issues = await loadProjectIssues(context, entityId, visibility).catch(() => []);
         return {
           found: true,
           entityType,
           entityId,
-          ...detectProjectDrift(project),
+          relatedIssues: summarizeProjectIssues(issues).slice(0, 8),
+          ...detectProjectDrift(project, issues),
         };
       }
 
@@ -336,6 +427,21 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
         title: document.title,
         contentText: summarizeDocumentContent(document.content, 1200),
       };
+    },
+
+    async callShipApi(context: FleetGraphChatToolContext, args: Record<string, unknown>) {
+      const method = typeof args.method === 'string' ? args.method : 'GET';
+      const path = typeof args.path === 'string' ? args.path : '';
+      const bodyJson = typeof args.bodyJson === 'string' || args.bodyJson === null
+        ? args.bodyJson
+        : null;
+
+      return callShipApiAsUser({
+        context,
+        method,
+        path,
+        bodyJson,
+      });
     },
   };
 }

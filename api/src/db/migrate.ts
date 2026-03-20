@@ -1,16 +1,10 @@
 #!/usr/bin/env npx ts-node
-/**
- * Database migration script
- * 1. Runs schema.sql for initial table setup
- * 2. Runs numbered migration files from migrations/ folder
- * 3. Tracks completed migrations in schema_migrations table
- */
-import { readdirSync, readFileSync } from 'fs';
+import { Pool } from 'pg';
+import { loadProductionSecrets } from '../config/ssm.js';
+import { loadEnvFiles } from '../config/env.js';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { Pool } from 'pg';
-import { loadEnvFiles } from '../config/env.js';
-import { loadProductionSecrets } from '../config/ssm.js';
+import { ensureDatabaseSchema } from './bootstrap.js';
 import { getDatabaseSslConfig } from './ssl.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,81 +29,18 @@ async function migrate() {
 
   try {
     console.log('Running database migrations...');
+    const appliedNow = await ensureDatabaseSchema(pool, console);
 
-    // Step 1: Run schema.sql for initial setup
-    const schemaPath = join(__dirname, 'schema.sql');
-    const schema = readFileSync(schemaPath, 'utf-8');
-    await pool.query(schema);
-    console.log('✅ Schema applied');
-
-    // Step 2: Create migrations tracking table
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at TIMESTAMPTZ DEFAULT now()
-      )
-    `);
-
-    // Step 3: Get list of already-applied migrations
-    const appliedResult = await pool.query('SELECT version FROM schema_migrations ORDER BY version');
-    const appliedMigrations = new Set(appliedResult.rows.map(r => r.version));
-
-    // Step 4: Find and run pending migrations
-    const migrationsDir = join(__dirname, 'migrations');
-    let migrationFiles: string[] = [];
-
-    try {
-      migrationFiles = readdirSync(migrationsDir)
-        .filter(f => f.endsWith('.sql'))
-        .sort(); // Ensures numeric order: 001_, 002_, etc.
-    } catch {
-      console.log('ℹ️  No migrations directory found');
-    }
-
-    let migrationsRun = 0;
-    for (const file of migrationFiles) {
-      const version = file.replace('.sql', '');
-
-      if (appliedMigrations.has(version)) {
-        continue; // Already applied
-      }
-
-      console.log(`  Running migration: ${file}`);
-      const migrationPath = join(migrationsDir, file);
-      const migrationSql = readFileSync(migrationPath, 'utf-8');
-
-      // Run migration in a transaction
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await client.query(migrationSql);
-        await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
-        await client.query('COMMIT');
-        console.log(`  ✅ ${file} applied`);
-        migrationsRun++;
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
-    }
-
-    if (migrationsRun === 0) {
+    if (appliedNow.length === 0) {
       console.log('✅ All migrations already applied');
     } else {
-      console.log(`✅ ${migrationsRun} migration(s) applied successfully`);
+      console.log(`✅ ${appliedNow.length} migration(s) applied successfully`);
     }
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    // "already exists" errors from schema.sql are fine
-    if (errorMessage.includes('already exists')) {
-      console.log('Database schema already exists, continuing...');
-    } else {
-      console.error('Database migration failed:', error);
-      process.exit(1);
-    }
+    console.error('Database migration failed:', errorMessage);
+    process.exit(1);
   } finally {
     await pool.end();
   }

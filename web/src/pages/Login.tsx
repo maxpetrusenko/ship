@@ -346,31 +346,26 @@ export function LoginPage() {
           </>
         )}
 
-        {/* Dev credentials hint - only shown in development */}
-        {import.meta.env.DEV && (
-          <div className="mt-8 text-center text-xs text-muted">
-            <p>Dev credentials:</p>
-            <p className="mt-1 font-mono text-muted">
-              dev@ship.local / admin123
-            </p>
-          </div>
-        )}
+        <div className="mt-8 text-center text-xs text-muted">
+          <p>Dev credentials:</p>
+          <p className="mt-1 font-mono text-muted">
+            dev@ship.local / admin123
+          </p>
+        </div>
 
         {/*
           USWDS Icon visual verification - different sizes and colors
           Used in E2E tests to verify icons are loading correctly 
         */}
-        {import.meta.env.VITE_APP_ENV !== 'production' && (
-          <div data-testid="uswds-icons" className="mt-6 border-t border-border pt-4 text-center text-xs text-muted">
-            <p className="mb-2 text-muted">USWDS Icons:</p>
-            <div className="flex items-center justify-center gap-3">
-              <Icon name="check" className="h-3 w-3 text-green-500" title="Check (h-3)" />
-              <Icon name="close" className="h-4 w-4 text-red-400" title="Close (h-4)" />
-              <Icon name="warning" className="h-5 w-5 text-yellow-500" title="Warning (h-5)" />
-              <Icon name="info" className="h-6 w-6 text-accent" title="Info (h-6)" />
-            </div>
+        <div data-testid="uswds-icons" className="mt-6 border-t border-border pt-4 text-center text-xs text-muted">
+          <p className="mb-2 text-muted">USWDS Icons:</p>
+          <div className="flex items-center justify-center gap-3">
+            <Icon name="check" className="h-3 w-3 text-green-500" title="Check (h-3)" />
+            <Icon name="close" className="h-4 w-4 text-red-400" title="Close (h-4)" />
+            <Icon name="warning" className="h-5 w-5 text-yellow-500" title="Warning (h-5)" />
+            <Icon name="info" className="h-6 w-6 text-accent" title="Info (h-6)" />
           </div>
-        )}
+        </div>
       </div>
     </main>
   );

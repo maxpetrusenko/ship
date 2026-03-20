@@ -7,7 +7,7 @@ import { useState, useCallback, useEffect, Suspense, lazy } from 'react';
 import { cn } from '@/lib/cn';
 import { useFleetGraphScope } from '@/hooks/useFleetGraphScope';
 import { useFleetGraphPageContext } from '@/hooks/useFleetGraphPageContext';
-import { useFleetGraphOnDemand } from '@/hooks/useFleetGraph';
+import { useFleetGraphOnDemand, useFleetGraphSeedDemoFlow } from '@/hooks/useFleetGraph';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 
 const FleetGraphChat = lazy(() =>
@@ -26,6 +26,7 @@ export function FleetGraphFloatingChat() {
 
   const workspaceId = currentWorkspace?.id ?? null;
   const onDemand = useFleetGraphOnDemand();
+  const seedDemo = useFleetGraphSeedDemoFlow();
 
   const handleTriggerAnalysis = useCallback(() => {
     console.log(`${LOG_PREFIX} trigger clicked`, { scopeType: scope.scopeType, scopeId: scope.scopeId, workspaceId, pathname: window.location.pathname });
@@ -58,7 +59,13 @@ export function FleetGraphFloatingChat() {
     setNewThreadNonce((current) => current + 1);
   }, [workspaceId]);
 
-  const isEntityScoped = scope.scopeType !== 'workspace';
+  const handleSeedDemo = useCallback(() => {
+    if (!workspaceId) return;
+    seedDemo.mutate({
+      entityType: scope.scopeType === 'workspace' ? 'workspace' : scope.scopeType,
+      entityId: scope.scopeId,
+    });
+  }, [scope.scopeId, scope.scopeType, seedDemo, workspaceId]);
 
   // Log context changes
   useEffect(() => {
@@ -90,41 +97,63 @@ export function FleetGraphFloatingChat() {
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-border/10">
             <div className="flex items-center gap-1.5 min-w-0">
-              <svg className="w-3.5 h-3.5 text-accent flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="text-xs font-medium text-foreground flex-shrink-0">Ship Chat</span>
-              {isEntityScoped && (
-                <span className="text-[10px] text-muted bg-border/40 px-1.5 py-0.5 rounded truncate max-w-[120px]">
-                  {scope.scopeLabel}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {/* Manual trigger button */}
               <button
                 type="button"
                 onClick={handleTriggerAnalysis}
                 disabled={onDemand.isPending || !workspaceId}
-                title="Run FleetGraph analysis"
+                title="Run FleetGraph analysis from header"
+                aria-label="Run FleetGraph analysis from header"
                 className={cn(
-                  'p-0.5 rounded transition-colors',
-                  'text-muted hover:text-accent hover:bg-accent/10',
+                  'flex-shrink-0 rounded p-0.5 transition-colors',
+                  'text-accent hover:bg-accent/10',
                   'disabled:opacity-40 disabled:cursor-not-allowed',
                   onDemand.isPending && 'animate-pulse',
                 )}
-                aria-label="Run FleetGraph analysis"
               >
                 <svg
                   className={cn(
                     'w-3.5 h-3.5 transition-transform',
-                    onDemand.isPending && 'animate-spin text-accent',
+                    onDemand.isPending && 'animate-spin',
                   )}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </button>
+              <span className="text-xs font-medium text-foreground flex-shrink-0">North Star</span>
+              <ScopeChip label={scope.scopeLabel} variant="header" />
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                onClick={handleSeedDemo}
+                disabled={seedDemo.isPending || !workspaceId}
+                title="Seed FleetGraph demo flow"
+                aria-label="Seed FleetGraph demo flow"
+                className={cn(
+                  'p-0.5 rounded transition-colors',
+                  'text-muted hover:text-red-400 hover:bg-red-500/10',
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
+                  seedDemo.isPending && 'animate-pulse',
+                )}
+              >
+                <svg
+                  className={cn(
+                    'w-3.5 h-3.5 transition-transform',
+                    seedDemo.isPending && 'animate-spin text-red-400',
+                  )}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9.75 3.75v2.5m4.5-2.5v2.5M8 8.5h8M7.5 20.25h9a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-9A1.5 1.5 0 0 0 6 11.75v7a1.5 1.5 0 0 0 1.5 1.5Zm1.25-6 1.5 1.5 3-3m-5.25 3.25 1.5 1.5m0-1.5-1.5 1.5m6-1.5 1.5 1.5m0-1.5-1.5 1.5"
+                  />
                 </svg>
               </button>
               <button
@@ -147,7 +176,7 @@ export function FleetGraphFloatingChat() {
                 type="button"
                 onClick={toggle}
                 className="text-muted hover:text-foreground transition-colors p-0.5 rounded hover:bg-border/30"
-                aria-label="Close Ship Chat"
+                aria-label="Close North Star"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -218,24 +247,34 @@ export function FleetGraphFloatingChat() {
             ? 'bg-accent text-white scale-90 h-12 w-12 justify-center'
             : 'bg-accent text-white hover:bg-accent/90 hover:scale-105 hover:shadow-xl hover:shadow-accent/30 h-12 px-4',
         )}
-        aria-label={isOpen ? 'Close Ship Chat' : 'Open Ship Chat'}
-        title="Ship Chat"
+        aria-label={isOpen ? 'Close North Star' : 'Open North Star'}
+        title="North Star"
       >
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
-        {/* Scope chip on button (collapsed state only) */}
         {!isOpen && (
-          <span className="text-xs font-medium truncate max-w-[140px]">
-            Ship Chat
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-xs font-medium flex-shrink-0">North Star</span>
           </span>
-        )}
-        {/* Green dot for entity-scoped context */}
-        {isEntityScoped && !isOpen && (
-          <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-background" />
         )}
       </button>
     </>
+  );
+}
+
+function ScopeChip({ label, variant }: { label: string; variant: 'header' }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex min-w-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none',
+        'max-w-[150px] overflow-hidden whitespace-nowrap text-ellipsis',
+        'border border-border/60 bg-border/40 text-muted',
+      )}
+      title={label}
+    >
+      {label}
+    </span>
   );
 }
 

@@ -69,6 +69,7 @@ Core job:
 - [Phase 2: Graph Architecture](./Phase%202/README.md)
 - [Phase 3: Stack and Deployment](./Phase%203/README.md)
 - [LangGraph Runtime Architecture](./LANGGRAPH_RUNTIME_ARCHITECTURE.md)
+- [MVP Architecture Script](./MVP_ARCHITECTURE_SCRIPT.md)
 
 ## Planning Workflow
 

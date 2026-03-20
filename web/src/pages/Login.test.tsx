@@ -69,4 +69,23 @@ describe('LoginPage', () => {
     expect(alert).toHaveAttribute('id', 'login-password-error');
     expect(screen.getByLabelText(/^password$/i)).toHaveAttribute('aria-describedby', 'login-password-error');
   });
+
+  it('shows demo credentials regardless of build environment', async () => {
+    render(<LoginPage />);
+
+    expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByText(/dev credentials:/i)).toBeInTheDocument();
+    expect(screen.getByText(/dev@ship\.local \/ admin123/i)).toBeInTheDocument();
+  });
+
+  it('shows the USWDS icon verification block regardless of build environment', async () => {
+    render(<LoginPage />);
+
+    expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByText(/uswds icons:/i)).toBeInTheDocument();
+    expect(screen.getByText('Check (h-3)')).toBeInTheDocument();
+    expect(screen.getByText('Close (h-4)')).toBeInTheDocument();
+    expect(screen.getByText('Warning (h-5)')).toBeInTheDocument();
+    expect(screen.getByText('Info (h-6)')).toBeInTheDocument();
+  });
 });

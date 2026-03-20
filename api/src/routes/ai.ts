@@ -14,8 +14,8 @@ type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
 // GET /api/ai/status - Check if AI analysis is available
-router.get('/status', authMiddleware, (_req: Request, res: Response) => {
-  res.json({ available: isAiAvailable() });
+router.get('/status', authMiddleware, async (_req: Request, res: Response) => {
+  res.json({ available: await isAiAvailable() });
 });
 
 // POST /api/ai/analyze-plan - Analyze weekly plan quality

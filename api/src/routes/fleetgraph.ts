@@ -35,8 +35,14 @@ import {
   markRecipientsRead,
   dismissRecipient,
   snoozeRecipient,
+  createRecipients,
+  createApproval,
 } from '../fleetgraph/runtime/index.js';
+import { executeShipAction } from '../fleetgraph/data/fetchers.js';
 import { runFleetGraphChat } from '../fleetgraph/chat/runtime.js';
+import { buildModalFeed, lookupEntityTitles, lookupIssueParents } from '../fleetgraph/modal-feed.js';
+import { seedFleetGraphDemoFlow } from '../fleetgraph/demo-seed.js';
+import { consumeUserBurstRateLimit } from '../services/user-burst-rate-limit.js';
 import type {
   FleetGraphChatRuntimeResult,
   FleetGraphChatToolCallRecord,
@@ -50,6 +56,8 @@ import type {
   FleetGraphRunState,
   FleetGraphChatRequest,
   FleetGraphChatResponse,
+  FleetGraphDemoSeedRequest,
+  FleetGraphDemoSeedResponse,
   FleetGraphChatMessage,
   FleetGraphChatDebugInfo,
   FleetGraphChatThreadResponse,
@@ -57,14 +65,138 @@ import type {
   FleetGraphPageViewResponse,
   FleetGraphEntityType,
   FleetGraphAlert,
+  FleetGraphModalFeedResponse,
   HumanGateOutcome,
 } from '@ship/shared';
 import { isFleetGraphReady } from '../fleetgraph/bootstrap.js';
 
 const router = Router();
+const CHAT_RATE_LIMIT_NAMESPACE = 'fleetgraph-chat';
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getFleetGraphChatRateLimitConfig() {
+  const defaultMax = process.env.NODE_ENV === 'test' ? 1000 : process.env.NODE_ENV === 'production' ? 12 : 60;
+  return {
+    max: parsePositiveInt(process.env.FLEETGRAPH_CHAT_RATE_LIMIT_MAX, defaultMax),
+    windowMs: parsePositiveInt(process.env.FLEETGRAPH_CHAT_RATE_LIMIT_WINDOW_MS, 60_000),
+  };
+}
+
+function serializeError(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: err.message,
+      ...(typeof (err as Error & { context?: unknown }).context !== 'undefined'
+        ? { context: (err as Error & { context?: unknown }).context }
+        : {}),
+    };
+  }
+
+  return { message: String(err) };
+}
+
+function normalizeRecipientMatchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}@._+\-\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function resolveExplicitChatRecipientIds(
+  workspaceId: string,
+  question: string,
+): Promise<string[]> {
+  const normalizedQuestion = normalizeRecipientMatchText(question);
+  if (!normalizedQuestion) {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT u.id, u.email, u.name
+     FROM workspace_memberships wm
+     JOIN users u ON u.id = wm.user_id
+     WHERE wm.workspace_id = $1`,
+    [workspaceId],
+  );
+
+  const matched = new Set<string>();
+
+  for (const row of result.rows) {
+    const email = typeof row.email === 'string' ? row.email : '';
+    const name = typeof row.name === 'string' ? row.name : '';
+    const normalizedEmail = normalizeRecipientMatchText(email);
+    const normalizedName = normalizeRecipientMatchText(name);
+
+    if (
+      (normalizedEmail && normalizedQuestion.includes(normalizedEmail))
+      || (normalizedName && normalizedQuestion.includes(normalizedName))
+    ) {
+      matched.add(row.id as string);
+    }
+  }
+
+  return [...matched];
+}
 
 // All routes require authentication
 router.use(authMiddleware);
+
+// -------------------------------------------------------------------------
+// POST /api/fleetgraph/demo/seed-flow
+// -------------------------------------------------------------------------
+
+router.post('/demo/seed-flow', async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  if (!isFleetGraphReady()) {
+    return res.status(503).json({ error: 'FleetGraph is not initialized' });
+  }
+
+  try {
+    const userId = req.userId!;
+    const workspaceId = req.workspaceId!;
+    const body = req.body as Partial<FleetGraphDemoSeedRequest>;
+
+    if (!body.entityType || !body.entityId) {
+      return res.status(400).json({ error: 'entityType and entityId are required' });
+    }
+
+    const response: FleetGraphDemoSeedResponse = await seedFleetGraphDemoFlow({
+      pool,
+      workspaceId,
+      userId,
+      entityType: body.entityType,
+      entityId: body.entityId,
+      invokeGraph,
+      upsertAlert,
+      createRecipients,
+      createApproval,
+      getOrCreateActiveThread,
+      appendChatMessage,
+    });
+
+    if (response.seededIssueCount === 0) {
+      return res.status(409).json({ error: 'No eligible issues found for demo seeding' });
+    }
+
+    return res.json(response);
+  } catch (err) {
+    console.error('[FleetGraph] demo seed error:', err);
+    return res.status(500).json({ error: 'Failed to seed FleetGraph demo flow' });
+  }
+});
 
 // -------------------------------------------------------------------------
 // POST /api/fleetgraph/on-demand
@@ -259,10 +391,8 @@ router.get('/chat/thread', async (req: Request, res: Response) => {
   try {
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
-    const entityType = req.query.entityType as FleetGraphEntityType | undefined;
-    const entityId = req.query.entityId as string | undefined;
 
-    const thread = await getActiveThread(pool, workspaceId, userId, entityType, entityId);
+    const thread = await getActiveThread(pool, workspaceId, userId);
     const messages = thread ? await loadRecentMessages(pool, thread.id) : [];
 
     const response: FleetGraphChatThreadResponse = { thread, messages };
@@ -282,6 +412,11 @@ router.post('/chat/thread', async (req: Request, res: Response) => {
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
     const { entityType, entityId } = req.body as { entityType?: FleetGraphEntityType; entityId?: string };
+    const hasPartialScope = (!!entityType) !== (!!entityId);
+
+    if (hasPartialScope) {
+      return res.status(400).json({ error: 'entityType and entityId must be provided together' });
+    }
 
     const thread = await createThread(pool, workspaceId, userId, entityType, entityId);
     const response: FleetGraphCreateChatThreadResponse = { thread };
@@ -301,58 +436,137 @@ router.post('/chat', async (req: Request, res: Response) => {
     return res.status(503).json({ error: 'FleetGraph is not initialized' });
   }
 
+  const body = req.body as Partial<FleetGraphChatRequest>;
+  let thread: Awaited<ReturnType<typeof getOrCreateActiveThread>> | Awaited<ReturnType<typeof getThreadById>> | null = null;
+  let history: Awaited<ReturnType<typeof loadRecentMessages>> = [];
+  let runtimeResult: FleetGraphChatRuntimeResult | null = null;
+  let effectivePageContext: FleetGraphChatRequest['pageContext'] = body.pageContext;
+
   try {
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
-    const body = req.body as FleetGraphChatRequest;
+    const chatBody = body as FleetGraphChatRequest;
 
-    if (!body.entityType || !body.entityId || !body.question) {
+    if (!chatBody.entityType || !chatBody.entityId || !chatBody.question) {
       return res.status(400).json({ error: 'entityType, entityId, and question are required' });
     }
 
-    // Resolve thread with entity scope
-    let thread;
-    if (body.threadId) {
-      thread = await getThreadById(pool, body.threadId, workspaceId, userId);
+    if (chatBody.threadId) {
+      thread = await getThreadById(pool, chatBody.threadId, workspaceId, userId);
       if (!thread) {
         return res.status(404).json({ error: 'Thread not found or access denied' });
       }
     } else {
-      thread = await getOrCreateActiveThread(pool, workspaceId, userId, body.entityType, body.entityId);
+      thread = await getOrCreateActiveThread(pool, workspaceId, userId, undefined, undefined);
     }
 
-    // Update page context if provided
-    if (body.pageContext) {
-      await updateThreadPageContext(pool, thread.id, body.pageContext);
+    if (chatBody.pageContext) {
+      await updateThreadPageContext(pool, thread.id, chatBody.pageContext);
     }
 
     // Load recent history from DB
-    const history = await loadRecentMessages(pool, thread.id);
+    history = await loadRecentMessages(pool, thread.id);
+
+    const rateLimitConfig = getFleetGraphChatRateLimitConfig();
+    const rateLimit = consumeUserBurstRateLimit(
+      CHAT_RATE_LIMIT_NAMESPACE,
+      userId,
+      rateLimitConfig.max,
+      rateLimitConfig.windowMs,
+    );
+    if (!rateLimit.allowed) {
+      res.set('Retry-After', String(rateLimit.retryAfterSeconds));
+      return res.status(429).json({
+        error: `Rate limit exceeded. Max ${rateLimit.limit} FleetGraph chat requests per minute.`,
+      });
+    }
 
     const runId = crypto.randomUUID();
 
-    let runtimeResult: FleetGraphChatRuntimeResult;
     try {
+      effectivePageContext = chatBody.pageContext ?? thread.lastPageContext ?? undefined;
       runtimeResult = await runFleetGraphChat({
         workspaceId,
         userId,
         threadId: thread.id,
-        entityType: body.entityType,
-        entityId: body.entityId,
-        question: body.question,
+        entityType: chatBody.entityType,
+        entityId: chatBody.entityId,
+        question: chatBody.question,
         history: history.map((m) => ({ role: m.role, content: m.content })),
-        pageContext: body.pageContext ?? null,
+        pageContext: effectivePageContext,
       });
     } catch (chatErr) {
-      console.error('[FleetGraph] Chat graph invocation failed:', chatErr);
+      console.error('[FleetGraph] Chat graph invocation failed:', {
+        error: serializeError(chatErr),
+        request: {
+          userId,
+          workspaceId,
+          threadId: thread.id,
+          entityType: chatBody.entityType,
+          entityId: chatBody.entityId,
+          question: chatBody.question,
+          pageRoute: effectivePageContext?.route ?? null,
+          historyCount: history.length,
+        },
+      });
       return res.status(502).json({ error: 'FleetGraph chat runtime failed' });
     }
 
+    // If the chat produced a confirm_action with a proposedAction, persist an
+    // alert so the inline accept/dismiss buttons have an alertId to resolve.
+    if (
+      runtimeResult.assessment.branch === 'confirm_action'
+      && runtimeResult.assessment.proposedAction
+    ) {
+      const fingerprint = `chat:${workspaceId}:${chatBody.entityType}:${chatBody.entityId}:${runId}`;
+      try {
+        const proposedAction = runtimeResult.assessment.proposedAction!;
+        const explicitRecipientIds = await resolveExplicitChatRecipientIds(
+          workspaceId,
+          chatBody.question,
+        );
+        const recipientIds = [...new Set([userId, ...explicitRecipientIds])];
+        const chatAlert = await upsertAlert(pool, {
+          workspaceId,
+          fingerprint,
+          signalType: 'chat_suggestion',
+          entityType: chatBody.entityType,
+          entityId: chatBody.entityId,
+          severity: 'medium',
+          summary: runtimeResult.assessment.summary,
+          recommendation: runtimeResult.assessment.recommendation,
+          citations: runtimeResult.assessment.citations,
+          ownerUserId: userId,
+          status: 'active',
+        });
+        await createRecipients(pool, chatAlert.id, recipientIds);
+        // Create approval record so the resolve route can execute the action
+        await createApproval(pool, {
+          workspaceId,
+          alertId: chatAlert.id,
+          runId,
+          threadId: `chat:${thread.id}`,
+          checkpointId: null,
+          actionType: proposedAction.actionType,
+          targetEntityType: proposedAction.targetEntityType,
+          targetEntityId: proposedAction.targetEntityId,
+          description: proposedAction.description,
+          payload: proposedAction.payload,
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 72 * 60 * 60_000).toISOString(),
+        });
+        console.log(`[FleetGraph] Chat suggestion alert+approval created: id=${chatAlert.id}`);
+      } catch (alertErr) {
+        // Non-critical: buttons won't work but chat still functions
+        console.error('[FleetGraph] Failed to create chat suggestion alert:', alertErr);
+      }
+    }
+
     // Fetch alerts for the entity (created during graph run or pre-existing)
-    const alerts = await getAlertsByEntity(pool, body.entityType, body.entityId);
+    const alerts = await getAlertsByEntity(pool, chatBody.entityType, chatBody.entityId);
     const activeAlerts = alerts.filter((a) => a.status === 'active' && a.workspaceId === workspaceId);
     const assistantAlertId = resolveAssistantAlertId(runtimeResult.assessment, activeAlerts);
-    const debugInfo = buildChatDebugInfoFromRuntime(runtimeResult, body.entityType, body.entityId);
+    const debugInfo = buildChatDebugInfoFromRuntime(runtimeResult, chatBody.entityType, chatBody.entityId);
 
     const assistantMessage: FleetGraphChatMessage = {
       ...runtimeResult.message,
@@ -361,7 +575,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       debug: debugInfo,
     };
 
-    await appendChatMessage(pool, thread.id, 'user', body.question);
+    await appendChatMessage(pool, thread.id, 'user', chatBody.question);
     await appendChatMessage(
       pool,
       thread.id,
@@ -386,7 +600,25 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     return res.json(response);
   } catch (err) {
-    console.error('[FleetGraph] chat error:', err);
+    const body = req.body as Partial<FleetGraphChatRequest>;
+    console.error('[FleetGraph] chat error:', {
+      error: serializeError(err),
+      request: {
+        userId: req.userId ?? null,
+        workspaceId: req.workspaceId ?? null,
+        threadId: thread?.id ?? body.threadId ?? null,
+        entityType: body.entityType ?? null,
+        entityId: body.entityId ?? null,
+        question: body.question ?? null,
+        pageRoute: effectivePageContext?.route ?? body.pageContext?.route ?? null,
+        historyCount: history.length,
+      },
+      runtime: {
+        branch: runtimeResult?.assessment.branch ?? null,
+        traceUrl: runtimeResult?.traceUrl ?? null,
+        toolNames: runtimeResult?.toolCalls.map((toolCall) => toolCall.name) ?? [],
+      },
+    });
     return res.status(500).json({ error: 'Failed to process chat message' });
   }
 });
@@ -449,6 +681,41 @@ router.post('/page-view', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[FleetGraph] page-view error:', err);
     return res.status(500).json({ error: 'Failed to process page view' });
+  }
+});
+
+// -------------------------------------------------------------------------
+// GET /api/fleetgraph/modal-feed (server-prioritized for ActionItemsModal)
+// -------------------------------------------------------------------------
+
+router.get('/modal-feed', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const workspaceId = req.workspaceId!;
+
+    const [alerts, pendingApprovals] = await Promise.all([
+      getUserAlerts(pool, userId, workspaceId),
+      getPendingApprovals(pool, workspaceId),
+    ]);
+
+    // Look up entity titles + parent associations for suppression
+    const entityIds = alerts.map((a) => a.entityId);
+    const issueIds = alerts.filter((a) => a.entityType === 'issue').map((a) => a.entityId);
+
+    const [entityTitles, parentEntityMap] = await Promise.all([
+      lookupEntityTitles(pool, entityIds, workspaceId),
+      lookupIssueParents(pool, issueIds, workspaceId),
+    ]);
+
+    const feed: FleetGraphModalFeedResponse = buildModalFeed(
+      alerts,
+      pendingApprovals,
+      { entityTitles, parentEntityMap },
+    );
+    return res.json(feed);
+  } catch (err) {
+    console.error('[FleetGraph] modal-feed error:', err);
+    return res.status(500).json({ error: 'Failed to fetch modal feed' });
   }
 });
 
@@ -544,6 +811,8 @@ router.post('/alerts/:id/resolve', async (req: Request, res: Response) => {
           return res.status(410).json({ error: 'Approval has expired' });
         }
 
+        const isChatSuggestion = approval.threadId?.startsWith('chat:');
+
         if (body.outcome === 'approve') {
           // Mark approval as approved (CAS: only if still pending)
           const updated = await updateApprovalStatus(pool, approval.id, 'approved', userId);
@@ -551,13 +820,19 @@ router.post('/alerts/:id/resolve', async (req: Request, res: Response) => {
             return res.status(409).json({ error: 'Approval already processed' });
           }
 
-          // Resume the paused graph with 'approve' outcome.
-          // The graph's execute_action node handles the actual Ship API call.
-          const threadId = approval.threadId ?? approval.runId;
-          try {
-            const result = await resumeGraph(threadId, 'approve' as HumanGateOutcome);
-            if (result.state.error) {
-              console.error('[FleetGraph] Graph resume execute_action failed:', result.state.error.errorClass);
+          if (isChatSuggestion) {
+            // Chat suggestions: execute action directly (no paused graph)
+            try {
+              await executeShipAction(
+                workspaceId,
+                approval.actionType,
+                approval.targetEntityType,
+                approval.targetEntityId,
+                approval.payload,
+              );
+              await updateApprovalStatus(pool, approval.id, 'executed', userId);
+            } catch (execErr) {
+              console.error('[FleetGraph] Chat suggestion action failed:', execErr);
               await updateApprovalStatus(pool, approval.id, 'execution_failed', userId);
               return res.status(502).json({
                 success: false,
@@ -565,15 +840,30 @@ router.post('/alerts/:id/resolve', async (req: Request, res: Response) => {
                 approvalStatus: 'execution_failed',
               });
             }
-            await updateApprovalStatus(pool, approval.id, 'executed', userId);
-          } catch (resumeErr) {
-            console.error('[FleetGraph] Graph resume failed:', resumeErr);
-            await updateApprovalStatus(pool, approval.id, 'execution_failed', userId);
-            return res.status(502).json({
-              success: false,
-              error: 'Action execution failed',
-              approvalStatus: 'execution_failed',
-            });
+          } else {
+            // Graph-based: resume the paused graph with 'approve' outcome.
+            const threadId = approval.threadId ?? approval.runId;
+            try {
+              const result = await resumeGraph(threadId, 'approve' as HumanGateOutcome);
+              if (result.state.error) {
+                console.error('[FleetGraph] Graph resume execute_action failed:', result.state.error.errorClass);
+                await updateApprovalStatus(pool, approval.id, 'execution_failed', userId);
+                return res.status(502).json({
+                  success: false,
+                  error: 'Action execution failed',
+                  approvalStatus: 'execution_failed',
+                });
+              }
+              await updateApprovalStatus(pool, approval.id, 'executed', userId);
+            } catch (resumeErr) {
+              console.error('[FleetGraph] Graph resume failed:', resumeErr);
+              await updateApprovalStatus(pool, approval.id, 'execution_failed', userId);
+              return res.status(502).json({
+                success: false,
+                error: 'Action execution failed',
+                approvalStatus: 'execution_failed',
+              });
+            }
           }
         } else {
           // reject (CAS: only if still pending)
@@ -582,14 +872,15 @@ router.post('/alerts/:id/resolve', async (req: Request, res: Response) => {
             return res.status(409).json({ error: 'Approval already processed' });
           }
 
-          // Resume the paused graph with 'dismiss' outcome -> log_dismissal
-          const threadId = approval.threadId ?? approval.runId;
-          try {
-            await resumeGraph(threadId, 'dismiss' as HumanGateOutcome);
-          } catch (resumeErr) {
-            // Non-critical: the approval is already dismissed in DB.
-            // Log but do not fail the HTTP response.
-            console.error('[FleetGraph] Graph resume for dismiss failed:', resumeErr);
+          if (!isChatSuggestion) {
+            // Graph-based: resume the paused graph with 'dismiss' outcome
+            const threadId = approval.threadId ?? approval.runId;
+            try {
+              await resumeGraph(threadId, 'dismiss' as HumanGateOutcome);
+            } catch (resumeErr) {
+              // Non-critical: the approval is already dismissed in DB.
+              console.error('[FleetGraph] Graph resume for dismiss failed:', resumeErr);
+            }
           }
         }
       }

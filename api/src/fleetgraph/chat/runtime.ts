@@ -42,7 +42,22 @@ import {
 } from '../runtime/langsmith.js';
 
 const DEFAULT_MAX_STEPS = 4;
+const DETAILED_ANALYSIS_MAX_STEPS = 10;
 const DEFAULT_STEP_TIMEOUT_MS = 15_000;
+
+export class FleetGraphChatRuntimeError extends Error {
+  readonly context: Record<string, unknown>;
+
+  constructor(message: string, context: Record<string, unknown>) {
+    super(message);
+    this.name = 'FleetGraphChatRuntimeError';
+    this.context = context;
+  }
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 function createDefaultClient(): FleetGraphResponsesClientLike {
   if (!process.env.OPENAI_API_KEY) {
@@ -66,7 +81,137 @@ function buildUserPrompt(request: FleetGraphChatRequest): string {
     `entityType: ${request.entityType}`,
     `entityId: ${request.entityId}`,
     request.pageContext ? `pageContext.route: ${request.pageContext.route}` : 'pageContext.route: none',
+    request.pageContext?.documentId ? `pageContext.documentId: ${request.pageContext.documentId}` : 'pageContext.documentId: none',
+    request.pageContext?.title ? `pageContext.title: ${request.pageContext.title}` : 'pageContext.title: none',
+    request.pageContext?.documentType ? `pageContext.documentType: ${request.pageContext.documentType}` : 'pageContext.documentType: none',
+    request.pageContext?.tab ? `pageContext.tab: ${request.pageContext.tab}` : 'pageContext.tab: none',
   ].join('\n');
+}
+
+function questionExplicitlyTargetsAnotherIssue(question: string): boolean {
+  const normalized = question.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (/#\d+/.test(normalized)) {
+    return true;
+  }
+
+  return /\b(ticket|issue|document|doc)\s+([a-f0-9]{8}-[a-f0-9-]{27}|[a-z0-9_-]{6,})\b/i.test(normalized);
+}
+
+function normalizeAssessmentTarget(
+  request: FleetGraphChatRequest,
+  assessment: FleetGraphChatRuntimeAssessment,
+): FleetGraphChatRuntimeAssessment {
+  const proposedAction = assessment.proposedAction;
+  if (!proposedAction) {
+    return assessment;
+  }
+
+  if (request.entityType !== 'issue' || proposedAction.targetEntityType !== 'issue') {
+    return assessment;
+  }
+
+  const currentIssueId = request.pageContext?.documentId ?? request.entityId;
+  if (!currentIssueId || proposedAction.targetEntityId === currentIssueId) {
+    return assessment;
+  }
+
+  if (questionExplicitlyTargetsAnotherIssue(request.question)) {
+    return assessment;
+  }
+
+  const citations = assessment.citations.includes('page-context:current-issue-target')
+    ? assessment.citations
+    : [...assessment.citations, 'page-context:current-issue-target'];
+
+  return {
+    ...assessment,
+    citations,
+    proposedAction: {
+      ...proposedAction,
+      targetEntityId: currentIssueId,
+    },
+  };
+}
+
+function isIssueWriteIntent(request: FleetGraphChatRequest): boolean {
+  if (request.entityType !== 'issue') {
+    return false;
+  }
+
+  const normalized = request.question.trim().toLowerCase();
+  if (!normalized || isCurrentPageContentQuestion(request)) {
+    return false;
+  }
+
+  return /\b(add|update|edit|change|rewrite|comment|move|reassign|set|mark|apply|approve|do it|do that|please do it|please do that|fix)\b/.test(normalized)
+    || /^(yes|ok|okay|sure)\b/.test(normalized);
+}
+
+function isDetailedAnalysisRequest(request: FleetGraphChatRequest): boolean {
+  const normalized = request.question.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return /\b(detailed|detail|deeper|deep|comprehensive|thorough|root cause|investigate|full analysis|full review|trace)\b/.test(normalized);
+}
+
+function compactPreloadedValue(value: unknown, maxLength = 1600): string {
+  const text = JSON.stringify(value);
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
+async function maybePreloadIssueWriteContext(
+  request: FleetGraphChatRequest,
+  data: FleetGraphChatDataAccess,
+  context: FleetGraphChatToolContext,
+): Promise<{
+  inputItems: FleetGraphResponsesInputItem[];
+  records: FleetGraphChatToolCallRecord[];
+} | null> {
+  if (!isIssueWriteIntent(request)) {
+    return null;
+  }
+
+  const issueId = request.pageContext?.documentId ?? request.entityId;
+  const [issueContext, documentContent] = await Promise.all([
+    data.fetchIssueContext(context, { issueId }),
+    data.fetchDocumentContent(context, { documentId: issueId }),
+  ]);
+
+  return {
+    inputItems: [{
+      type: 'message',
+      role: 'developer',
+      content: [
+        'Preloaded current issue context for this write request.',
+        `issueContext=${compactPreloadedValue(issueContext)}`,
+        `documentContent=${compactPreloadedValue(documentContent)}`,
+        'Use this evidence to choose the correct current issue target and approval action.',
+      ].join('\n'),
+    }],
+    records: [
+      {
+        name: 'fetch_issue_context',
+        callId: 'preflight-issue-context',
+        arguments: { issueId },
+        result: issueContext,
+      },
+      {
+        name: 'fetch_document_content',
+        callId: 'preflight-document-content',
+        arguments: { documentId: issueId },
+        result: documentContent,
+      },
+    ],
+  };
 }
 
 type ResponseOutputItem = FleetGraphResponsesResponseLike['output'][number];
@@ -301,10 +446,9 @@ function classifyBlockedQuestion(question: string): FleetGraphChatRuntimeAssessm
     return null;
   }
 
-  const disclosureVerb = /(give|show|reveal|tell|list|dump|expose|share|print|display|return|send|what(?:'s| is)|where(?:'s| is))/i;
-  const sensitiveTarget = /(secret|password|api[\s_-]?key|token|credential|private key|ssh key|\.env|env vars?|database|db\b|database url|connection string|deployment|deploy config|production server|prod server|infra(?:structure)?|hostinger|ssh access)/i;
+  const sensitiveTarget = /(secret|password|api[\s_-]?key|token|credential|private key|ssh key|\.env|env vars?|database|db\b|database url|connection string|deployment|deploy config|production server|prod server|access details?|infra(?:structure)?|hostinger|ssh access)/i;
 
-  if (!(disclosureVerb.test(question) && sensitiveTarget.test(question))) {
+  if (!sensitiveTarget.test(normalized)) {
     return null;
   }
 
@@ -354,7 +498,7 @@ async function runFleetGraphChatInternal(
   if (directCurrentPageAnswer) {
     return directCurrentPageAnswer;
   }
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
+  const maxSteps = deps.maxSteps ?? (isDetailedAnalysisRequest(request) ? DETAILED_ANALYSIS_MAX_STEPS : DEFAULT_MAX_STEPS);
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const toolSchemas = getFleetGraphChatToolSchemas();
   const toolNames = getFleetGraphChatToolNames();
@@ -366,6 +510,7 @@ async function runFleetGraphChatInternal(
     entityId: request.entityId,
     pageContext: normalizeChatPageContext(request.pageContext ?? null),
   };
+  const preloadedIssueWriteContext = await maybePreloadIssueWriteContext(request, data, toolContext);
 
   let responseId: string | null = null;
   let step = 0;
@@ -376,39 +521,55 @@ async function runFleetGraphChatInternal(
       role: 'user',
       content: buildUserPrompt(request),
     },
+    ...(preloadedIssueWriteContext?.inputItems ?? []),
   ];
-  const toolCalls: FleetGraphChatToolCallRecord[] = [];
+  const toolCalls: FleetGraphChatToolCallRecord[] = [...(preloadedIssueWriteContext?.records ?? [])];
 
   while (step < maxSteps) {
-    const response: FleetGraphResponsesResponseLike = await withTimeout(
-      client.responses.create({
-        model: deps.model ?? FLEETGRAPH_CHAT_MODEL,
-        input,
-        previous_response_id: responseId ?? undefined,
-        instructions: buildFleetGraphChatInstructions({
-          workspaceId: request.workspaceId,
-          userId: request.userId,
-          threadId: request.threadId,
-          entityType: request.entityType,
-          entityId: request.entityId,
-          pageContext: toolContext.pageContext,
-          toolNames,
-          historyCount: request.history?.length ?? 0,
-        }),
-        tools: toolSchemas,
-        tool_choice: 'auto',
-        text: buildResponseFormat(),
-        truncation: 'auto',
-      }) as Promise<FleetGraphResponsesResponseLike>,
-      stepTimeoutMs,
-      'FleetGraph chat model step',
-    );
+    let response: FleetGraphResponsesResponseLike;
+    try {
+      response = await withTimeout(
+        client.responses.create({
+          model: deps.model ?? FLEETGRAPH_CHAT_MODEL,
+          input,
+          previous_response_id: responseId ?? undefined,
+          instructions: buildFleetGraphChatInstructions({
+            workspaceId: request.workspaceId,
+            userId: request.userId,
+            threadId: request.threadId,
+            entityType: request.entityType,
+            entityId: request.entityId,
+            pageContext: toolContext.pageContext,
+            toolNames,
+            historyCount: request.history?.length ?? 0,
+          }),
+          tools: toolSchemas,
+          tool_choice: 'auto',
+          text: buildResponseFormat(),
+          truncation: 'auto',
+        }) as Promise<FleetGraphResponsesResponseLike>,
+        stepTimeoutMs,
+        'FleetGraph chat model step',
+      );
+    } catch (err) {
+      const causeMessage = getErrorMessage(err);
+      throw new FleetGraphChatRuntimeError(`FleetGraph chat model step failed: ${causeMessage}`, {
+        step: step + 1,
+        entityType: request.entityType,
+        entityId: request.entityId,
+        threadId: request.threadId,
+        pageRoute: toolContext.pageContext?.route ?? null,
+        responseId,
+        historyCount: request.history?.length ?? 0,
+        causeMessage,
+      });
+    }
 
     responseId = response.id ?? responseId;
     const functionCalls = extractFunctionCalls(response);
 
     if (functionCalls.length === 0) {
-      const assessment = parseAssessment(response.output_text);
+      const assessment = normalizeAssessmentTarget(request, parseAssessment(response.output_text));
       return {
         responseId,
         traceUrl: null,
@@ -429,13 +590,29 @@ async function runFleetGraphChatInternal(
         rawArguments: call.arguments,
         context: toolContext,
       });
-      const result = await executeFleetGraphChatTool({
-        name: toolName,
-        rawArguments: JSON.stringify(inputArgs),
-        callId: call.call_id,
-        context: toolContext,
-        data,
-      });
+      let result;
+      try {
+        result = await executeFleetGraphChatTool({
+          name: toolName,
+          rawArguments: JSON.stringify(inputArgs),
+          callId: call.call_id,
+          context: toolContext,
+          data,
+        });
+      } catch (err) {
+        const causeMessage = getErrorMessage(err);
+        throw new FleetGraphChatRuntimeError(`FleetGraph chat tool failed: ${toolName}: ${causeMessage}`, {
+          step: step + 1,
+          toolName,
+          callId: call.call_id,
+          arguments: inputArgs,
+          entityType: request.entityType,
+          entityId: request.entityId,
+          threadId: request.threadId,
+          pageRoute: toolContext.pageContext?.route ?? null,
+          causeMessage,
+        });
+      }
 
       toolCalls.push(result.record);
       outputs.push({

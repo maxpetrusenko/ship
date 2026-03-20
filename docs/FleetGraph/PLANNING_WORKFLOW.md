@@ -18,7 +18,7 @@ This document is the canonical drafting workflow for FleetGraph planning artifac
 
 ## Phase 2 Workflow
 
-Primary skill: `bmad-create-architecture`
+Primary Spec Kit command: `/speckit.plan`
 
 Goal:
 Produce one coherent graph-architecture solution design, then split it into the existing Phase 2 doc surfaces:
@@ -41,10 +41,10 @@ Write cross-cutting decisions once in the coherent pass, then copy only the phas
 
 ## Phase 3 Workflow
 
-Primary skill for unknowns: `bmad-technical-research`
+Primary Spec Kit command for unknowns: `/speckit.clarify`
 
 Cleanup pass:
-Use `bmad-tech-writer` style cleanup after research decisions land.
+Use `/speckit.analyze` after research decisions land.
 
 Goal:
 Turn open deployment, performance, and cost questions into concrete implementation decisions for:
@@ -69,7 +69,7 @@ Cleanup expectations:
 
 ## Tightening Pass After Each Phase Draft
 
-Required skill: `bmad-advanced-elicitation`
+Required Spec Kit command: `/speckit.clarify`
 
 Use it after each phase draft to pressure-test:
 
@@ -84,7 +84,7 @@ The phase should read as if one system designer wrote it, even if multiple docs 
 
 ## Readiness Gate Before Implementation
 
-Required skill: `bmad-check-implementation-readiness`
+Required Spec Kit command: `/speckit.analyze`
 
 Run this after Phases 1 through 3 are drafted and reconciled.
 
@@ -103,10 +103,12 @@ Minimum readiness checks:
 
 When implementation starts:
 
-1. Run `bmad-create-epics-and-stories`
-2. Run `bmad-create-story` for each concrete build slice
+1. Run `/speckit.specify` to lock the active FleetGraph feature scope
+2. Run `/speckit.plan` to turn that scope into the implementation design
+3. Run `/speckit.tasks` to break the design into concrete build slices
+4. Run `/speckit.implement` or execute the generated tasks manually in sequence
 
-Story creation should inherit from the reconciled phase docs rather than re-deriving architecture inside each story.
+Task generation should inherit from the reconciled phase docs rather than re-deriving architecture inside each implementation slice.
 
 ## Operating Notes
 

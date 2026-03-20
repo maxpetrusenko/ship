@@ -43,10 +43,12 @@ vi.mock('../data/index.js', () => ({
 }));
 
 import { createFleetGraphChatDataAccess } from './data.js';
+import { callShipApiAsUser } from './user-api.js';
 
 describe('createFleetGraphChatDataAccess', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
     mockGetVisibilityContext.mockResolvedValue({ isAdmin: false });
     mockLegacyFetchIssue.mockRejectedValue(new Error('legacy fetchIssue path should not run'));
     mockLegacyFetchIssueChildren.mockRejectedValue(new Error('legacy fetchIssueChildren path should not run'));
@@ -195,6 +197,207 @@ describe('createFleetGraphChatDataAccess', () => {
       documentType: 'issue',
       title: 'Create admin dashboard',
       contentText: 'code is 123',
+    });
+  });
+
+  it('returns project rollups with in-progress counts and overloaded assignees', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'proj-1',
+          title: 'North Star',
+          properties: { plan: 'Tighten onboarding' },
+          content: null,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'iss-1',
+            title: 'Issue 1',
+            ticket_number: 11,
+            state: 'in_progress',
+            priority: 'high',
+            assignee_id: 'user-2',
+            assignee_name: 'Taylor',
+          },
+          {
+            id: 'iss-2',
+            title: 'Issue 2',
+            ticket_number: 12,
+            state: 'in_progress',
+            priority: 'medium',
+            assignee_id: 'user-2',
+            assignee_name: 'Taylor',
+          },
+          {
+            id: 'iss-3',
+            title: 'Issue 3',
+            ticket_number: 13,
+            state: 'in_progress',
+            priority: 'medium',
+            assignee_id: 'user-2',
+            assignee_name: 'Taylor',
+          },
+          {
+            id: 'iss-4',
+            title: 'Issue 4',
+            ticket_number: 14,
+            state: 'in_progress',
+            priority: 'low',
+            assignee_id: 'user-2',
+            assignee_name: 'Taylor',
+          },
+          {
+            id: 'iss-5',
+            title: 'Issue 5',
+            ticket_number: 15,
+            state: 'in_progress',
+            priority: 'low',
+            assignee_id: 'user-2',
+            assignee_name: 'Taylor',
+          },
+          {
+            id: 'iss-6',
+            title: 'Issue 6',
+            ticket_number: 16,
+            state: 'done',
+            priority: 'low',
+            assignee_id: 'user-3',
+            assignee_name: 'Jordan',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { id: 'sprint-1', title: 'Week 1', status: 'active', sprint_number: '1' },
+          { id: 'sprint-2', title: 'Week 2', status: 'planned', sprint_number: '2' },
+        ],
+      });
+
+    const data = createFleetGraphChatDataAccess();
+    const result = await data.fetchProjectSummary(
+      {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'project',
+        entityId: 'proj-1',
+        pageContext: null,
+      },
+      { projectId: 'proj-1' },
+    );
+
+    expect(result).toMatchObject({
+      found: true,
+      project: {
+        id: 'proj-1',
+        title: 'North Star',
+      },
+      counts: {
+        total: 6,
+        done: 1,
+        in_progress: 5,
+      },
+      sprintCount: 2,
+      overloadedAssignees: [
+        {
+          assigneeId: 'user-2',
+          assigneeName: 'Taylor',
+          activeCount: 5,
+        },
+      ],
+    });
+    expect(result.assigneeLoads?.[0]).toMatchObject({
+      assigneeId: 'user-2',
+      activeCount: 5,
+    });
+  });
+
+  it('calls Ship API with a user-scoped bearer token', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [] });
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [1] }), { status: 200 }));
+
+    const result = await callShipApiAsUser({
+      context: {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'project',
+        entityId: 'proj-1',
+        pageContext: null,
+      },
+      method: 'GET',
+      path: '/api/documents',
+      bodyJson: null,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 200,
+      method: 'GET',
+      path: '/api/documents',
+      data: { items: [1] },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe('http://localhost:3000/api/documents');
+    expect((call?.[1] as RequestInit | undefined)?.headers).toMatchObject({
+      Authorization: expect.stringMatching(/^Bearer ship_/),
+    });
+  });
+
+  it('grounds project context drift in related issue titles before claiming no drift', async () => {
+    const projectRow = {
+      id: 'proj-1',
+      title: 'Authentication - Bug Fixes',
+      properties: { plan: 'Resolve auth defects to improve retention and reduce support costs.' },
+      content: null,
+    };
+    mockPoolQuery
+      // 1: loadVisibleProject (top-level)
+      .mockResolvedValueOnce({ rows: [projectRow] })
+      // 2: loadProjectRetroContext → loadVisibleProject (internal)
+      .mockResolvedValueOnce({ rows: [projectRow] })
+      // 3: loadProjectIssues (top-level) — issue titles for drift detection
+      .mockResolvedValueOnce({
+        rows: [
+          { id: 'iss-1', title: 'Add auth tests', state: 'todo', ticket_number: 7 },
+        ],
+      })
+      // 4-7: loadProjectRetroContext inner Promise.all (program, sprints, issues, retro)
+      .mockResolvedValueOnce({ rows: [] })  // program
+      .mockResolvedValueOnce({ rows: [] })  // sprints
+      .mockResolvedValueOnce({ rows: [] })  // issues (retro)
+      .mockResolvedValueOnce({ rows: [] }); // retro doc
+
+    const data = createFleetGraphChatDataAccess();
+    const result = await data.fetchProjectContext(
+      {
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        entityType: 'project',
+        entityId: 'proj-1',
+        pageContext: null,
+      },
+      { projectId: 'proj-1' },
+    );
+
+    expect(result).toMatchObject({
+      found: true,
+      project: {
+        id: 'proj-1',
+        title: 'Authentication - Bug Fixes',
+      },
+      drift: {
+        scopeDrift: false,
+        evidence: {
+          title: 'Authentication - Bug Fixes',
+          plan: 'Resolve auth defects to improve retention and reduce support costs.',
+        },
+      },
     });
   });
 });

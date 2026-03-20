@@ -11,7 +11,11 @@ import {
   getEntityDigest,
   setEntityDigest,
 } from './persistence.js';
-import { fetchActiveSprints, fetchIssues } from '../data/fetchers.js';
+import {
+  fetchActiveSprints,
+  fetchDocumentAssociations,
+  fetchIssues,
+} from '../data/fetchers.js';
 import { ShipApiClient } from '../data/client.js';
 import crypto from 'node:crypto';
 import { computeFleetGraphEntityDigest } from './digest.js';
@@ -40,6 +44,18 @@ type ActiveSprint = {
   workspaceId: string;
   entityId: string;
   source: ShipSprint;
+};
+
+type LinkedProject = {
+  id: string;
+  includeAllSprintIssues: boolean;
+};
+
+type ProjectRollup = {
+  workspaceId: string;
+  issues: Map<string, ShipIssueSummary>;
+  sprintIds: Set<string>;
+  projectRef: LinkedProject;
 };
 
 function isProactiveIssueCandidate(issue: ShipIssueSummary): boolean {
@@ -167,11 +183,19 @@ export class FleetGraphScheduler {
       const sprints = await this.getActiveSprints();
       console.log(`[FleetGraph] Found ${sprints.length} active sprints`);
 
-      // 3. Enqueue proactive runs for each sprint and its issues
+      // 3. Enqueue proactive runs for each sprint and its issues,
+      // collecting one upstream rollup per linked project across the full sweep.
       let enqueued = 0;
       let skippedUnchanged = 0;
+      const projectRollups = new Map<string, ProjectRollup>();
       for (const sprint of sprints) {
-        const sprintDigest = computeFleetGraphEntityDigest('sprint', sprint.source);
+        const issues = await this.getSprintIssues(sprint.entityId);
+        const linkedProjects = await this.getLinkedProjects(sprint.source, issues);
+        const sprintDigest = computeFleetGraphEntityDigest('sprint', {
+          sprint: sprint.source,
+          issues,
+          projectIds: linkedProjects.map((project) => project.id),
+        });
         const previousSprintDigest = await getEntityDigest(
           this.pool,
           sprint.workspaceId,
@@ -191,7 +215,6 @@ export class FleetGraphScheduler {
           if (added) enqueued++;
         }
 
-        const issues = await this.getSprintIssues(sprint.entityId);
         for (const issue of issues.filter(isProactiveIssueCandidate)) {
           const issueDigest = computeFleetGraphEntityDigest('issue', issue);
           const previousIssueDigest = await getEntityDigest(
@@ -214,6 +237,47 @@ export class FleetGraphScheduler {
           });
           if (added) enqueued++;
         }
+
+        for (const projectRef of linkedProjects) {
+          const rollup = projectRollups.get(projectRef.id) ?? {
+            workspaceId: sprint.workspaceId,
+            issues: new Map<string, ShipIssueSummary>(),
+            sprintIds: new Set<string>(),
+            projectRef,
+          };
+          rollup.sprintIds.add(sprint.entityId);
+          for (const issue of this.getProjectRollupIssues(projectRef, issues)) {
+            rollup.issues.set(issue.id, issue);
+          }
+          projectRollups.set(projectRef.id, rollup);
+        }
+      }
+
+      for (const [projectId, rollup] of projectRollups.entries()) {
+        const projectDigest = computeFleetGraphEntityDigest('project', {
+          projectId,
+          issues: [...rollup.issues.values()],
+          sprintIds: [...rollup.sprintIds].sort(),
+        });
+        const previousProjectDigest = await getEntityDigest(
+          this.pool,
+          rollup.workspaceId,
+          'project',
+          projectId,
+        );
+        if (previousProjectDigest === projectDigest) {
+          skippedUnchanged++;
+          continue;
+        }
+
+        const added = this.queue.enqueue({
+          workspaceId: rollup.workspaceId,
+          mode: 'proactive',
+          entityType: 'project',
+          entityId: projectId,
+          digest: projectDigest,
+        });
+        if (added) enqueued++;
       }
 
       if (enqueued > 0) {
@@ -271,6 +335,74 @@ export class FleetGraphScheduler {
       console.error(`[FleetGraph] Failed to fetch issues for sprint ${sprintId}:`, err);
       return [];
     }
+  }
+
+  private async getLinkedProjects(
+    sprint: ShipSprint,
+    issues: ShipIssueSummary[],
+  ): Promise<LinkedProject[]> {
+    const projects = new Map<string, LinkedProject>();
+
+    try {
+      const client = new ShipApiClient();
+      const associations = await fetchDocumentAssociations(client, sprint.id, 'project');
+      for (const association of associations) {
+        if (!association.related_id) continue;
+        if (!projects.has(association.related_id)) {
+          projects.set(association.related_id, {
+            id: association.related_id,
+            includeAllSprintIssues: true,
+          });
+        } else {
+          const existing = projects.get(association.related_id)!;
+          existing.includeAllSprintIssues = true;
+        }
+      }
+    } catch (err) {
+      console.error(`[FleetGraph] Failed to fetch sprint project links for ${sprint.id}:`, err);
+    }
+
+    for (const issue of issues) {
+      for (const relation of issue.belongs_to) {
+        if (relation.type !== 'project' || !relation.id) continue;
+        if (!projects.has(relation.id)) {
+          projects.set(relation.id, {
+            id: relation.id,
+            includeAllSprintIssues: false,
+          });
+        }
+      }
+    }
+
+    const sprintProjectId = typeof sprint.properties?.project_id === 'string'
+      ? sprint.properties.project_id
+      : null;
+    if (sprintProjectId && !projects.has(sprintProjectId)) {
+      projects.set(sprintProjectId, {
+        id: sprintProjectId,
+        includeAllSprintIssues: true,
+      });
+    } else if (sprintProjectId) {
+      const existing = projects.get(sprintProjectId)!;
+      existing.includeAllSprintIssues = true;
+    }
+
+    return [...projects.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  private getProjectRollupIssues(
+    project: LinkedProject,
+    issues: ShipIssueSummary[],
+  ): ShipIssueSummary[] {
+    if (project.includeAllSprintIssues) {
+      return issues;
+    }
+
+    return issues.filter((issue) =>
+      issue.belongs_to.some(
+        (relation) => relation.type === 'project' && relation.id === project.id,
+      ),
+    );
   }
 
   /** Drain the queue and invoke the graph for each item. */

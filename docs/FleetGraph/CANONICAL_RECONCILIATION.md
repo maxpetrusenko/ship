@@ -67,7 +67,7 @@ Stretch only until new admin endpoints exist:
 Trigger cadence:
 
 - event-triggered candidates enqueue immediately
-- fallback sweep runs every 4 minutes
+- fallback sweep runs every 4 minutes and rolls active sprint state up through issue and linked project stages
 - request handlers do not run graph reasoning inline
 
 ## 5. Canonical approval lifecycle

@@ -411,6 +411,7 @@ export async function getUserAlerts(
      JOIN fleetgraph_alert_recipients r ON r.alert_id = a.id
      WHERE r.user_id = $1
        AND a.workspace_id = $2
+       AND a.status = 'active'
        AND r.dismissed_at IS NULL
        AND (r.snoozed_until IS NULL OR r.snoozed_until <= NOW())
      ORDER BY a.last_surfaced_at DESC`,
@@ -434,6 +435,7 @@ export async function getUnreadCount(
      JOIN fleetgraph_alerts a ON a.id = r.alert_id
      WHERE r.user_id = $1
        AND a.workspace_id = $2
+       AND a.status = 'active'
        AND r.read_at IS NULL
        AND r.dismissed_at IS NULL
        AND (r.snoozed_until IS NULL OR r.snoozed_until <= NOW())`,
@@ -504,7 +506,7 @@ export async function snoozeRecipient(
 /** Max messages loaded into LLM prompt window. */
 const CHAT_MESSAGE_WINDOW = 20;
 
-/** Get the active thread for a user+workspace, optionally scoped to entity. */
+/** Get the active thread for a user+workspace. */
 export async function getActiveThread(
   pool: pg.Pool,
   workspaceId: string,
@@ -512,20 +514,11 @@ export async function getActiveThread(
   entityType?: FleetGraphEntityType | null,
   entityId?: string | null,
 ): Promise<FleetGraphChatThread | null> {
-  if (entityType && entityId) {
-    const result = await pool.query(
-      `SELECT * FROM fleetgraph_chat_threads
-       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
-         AND entity_type = $3 AND entity_id = $4
-       ORDER BY updated_at DESC LIMIT 1`,
-      [workspaceId, userId, entityType, entityId],
-    );
-    return result.rows[0] ? rowToThread(result.rows[0]) : null;
-  }
+  void entityType;
+  void entityId;
   const result = await pool.query(
     `SELECT * FROM fleetgraph_chat_threads
      WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
-       AND entity_type IS NULL AND entity_id IS NULL
      ORDER BY updated_at DESC LIMIT 1`,
     [workspaceId, userId],
   );
@@ -547,7 +540,7 @@ export async function getThreadById(
   return result.rows[0] ? rowToThread(result.rows[0]) : null;
 }
 
-/** Create a new active thread. Archives same-scope active threads only. */
+/** Create a new active thread. Archives any prior active thread in the workspace. */
 export async function createThread(
   pool: pg.Pool,
   workspaceId: string,
@@ -555,24 +548,12 @@ export async function createThread(
   entityType?: FleetGraphEntityType | null,
   entityId?: string | null,
 ): Promise<FleetGraphChatThread> {
-  // Archive same-scope active threads only
-  if (entityType && entityId) {
-    await pool.query(
-      `UPDATE fleetgraph_chat_threads
-       SET status = 'archived', updated_at = NOW()
-       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
-         AND entity_type = $3 AND entity_id = $4`,
-      [workspaceId, userId, entityType, entityId],
-    );
-  } else {
-    await pool.query(
-      `UPDATE fleetgraph_chat_threads
-       SET status = 'archived', updated_at = NOW()
-       WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'
-         AND entity_type IS NULL AND entity_id IS NULL`,
-      [workspaceId, userId],
-    );
-  }
+  await pool.query(
+    `UPDATE fleetgraph_chat_threads
+     SET status = 'archived', updated_at = NOW()
+     WHERE workspace_id = $1 AND user_id = $2 AND status = 'active'`,
+    [workspaceId, userId],
+  );
 
   const result = await pool.query(
     `INSERT INTO fleetgraph_chat_threads (workspace_id, user_id, status, entity_type, entity_id)
@@ -583,7 +564,7 @@ export async function createThread(
   return rowToThread(result.rows[0]);
 }
 
-/** Get or create the active thread for a user+workspace, optionally entity-scoped. */
+/** Get or create the active workspace thread for a user+workspace. */
 export async function getOrCreateActiveThread(
   pool: pg.Pool,
   workspaceId: string,
@@ -591,7 +572,7 @@ export async function getOrCreateActiveThread(
   entityType?: FleetGraphEntityType | null,
   entityId?: string | null,
 ): Promise<FleetGraphChatThread> {
-  const existing = await getActiveThread(pool, workspaceId, userId, entityType, entityId);
+  const existing = await getActiveThread(pool, workspaceId, userId);
   if (existing) return existing;
   return createThread(pool, workspaceId, userId, entityType, entityId);
 }
@@ -655,6 +636,7 @@ export async function updateThreadPageContext(
          last_page_surface = $3,
          last_page_document_id = $4,
          last_page_title = $5,
+         last_page_context = $6,
          updated_at = NOW()
      WHERE id = $1`,
     [
@@ -663,6 +645,7 @@ export async function updateThreadPageContext(
       pageContext.surface,
       pageContext.documentId ?? null,
       pageContext.title ?? null,
+      JSON.stringify(pageContext),
     ],
   );
 }
@@ -681,6 +664,7 @@ function rowToThread(row: Record<string, unknown>): FleetGraphChatThread {
     lastPageSurface: (row.last_page_surface as string) ?? null,
     lastPageDocumentId: (row.last_page_document_id as string) ?? null,
     lastPageTitle: (row.last_page_title as string) ?? null,
+    lastPageContext: (row.last_page_context as FleetGraphPageContext) ?? null,
     entityType: (row.entity_type as FleetGraphChatThread['entityType']) ?? null,
     entityId: (row.entity_id as string) ?? null,
     createdAt: (row.created_at as Date).toISOString(),

@@ -13,6 +13,7 @@ import {
   useFleetGraphCreateThread,
   useFleetGraphResolve,
 } from '@/hooks/useFleetGraph';
+import { useDocumentContextQuery } from '@/hooks/useDocumentContextQuery';
 import type {
   FleetGraphEntityType,
   FleetGraphAssessment,
@@ -68,17 +69,22 @@ const QUICK_PROMPTS: Record<string, string[]> = {
 
 const LOG_PREFIX = '[FleetGraph:Chat]';
 
-function getVisibleEditorText(): string | undefined {
+function getVisibleEditorText(pageContext?: FleetGraphPageContext): string | undefined {
   if (typeof document === 'undefined') {
     return undefined;
   }
 
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>('.ProseMirror'))
-    .map((node) => node.innerText.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length);
+  const documentId = pageContext?.documentId;
+  if (!documentId) {
+    return undefined;
+  }
 
-  return candidates[0] || undefined;
+  const editorWrapper = Array.from(document.querySelectorAll<HTMLElement>('[data-fleetgraph-editor="document"]'))
+    .find((node) => node.dataset.documentId === documentId);
+  const editorNode = editorWrapper?.querySelector<HTMLElement>('.ProseMirror');
+  const rawText = editorNode?.innerText ?? editorNode?.textContent ?? '';
+  const text = rawText.replace(/\s+/g, ' ').trim();
+  return text || undefined;
 }
 
 function buildLivePageContext(pageContext?: FleetGraphPageContext): FleetGraphPageContext | undefined {
@@ -86,7 +92,7 @@ function buildLivePageContext(pageContext?: FleetGraphPageContext): FleetGraphPa
     return undefined;
   }
 
-  const visibleContentText = getVisibleEditorText();
+  const visibleContentText = getVisibleEditorText(pageContext);
   if (!visibleContentText) {
     return pageContext;
   }
@@ -115,6 +121,9 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
     : 'text-muted bg-border/30';
 
   const isActionable = !!assessment.proposedAction && !!alertId && !!onAction;
+  const actionTarget = assessment.proposedAction
+    ? <ActionTargetSummary proposedAction={assessment.proposedAction} />
+    : null;
 
   const handleAction = async (outcome: 'approve' | 'dismiss') => {
     if (!onAction || !alertId) return;
@@ -182,6 +191,11 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
             Suggested Change
           </div>
           <p className="text-xs text-foreground">{assessment.proposedAction.description}</p>
+          {actionTarget && (
+            <div className="mt-1.5">
+              {actionTarget}
+            </div>
+          )}
         </div>
       )}
       {/* Inline action controls for confirm_action */}
@@ -221,8 +235,15 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
         <div className="text-[10px] text-muted py-1">Processing...</div>
       )}
       {isActionable && actionState === 'done' && (
-        <div className="text-[10px] text-green-400 bg-green-500/10 px-2 py-1 rounded text-center">
-          Action completed
+        <div className="space-y-1 rounded bg-green-500/10 px-2 py-1.5 text-center">
+          <div className="text-[10px] text-green-400">
+            {formatCompletedActionLabel(assessment.proposedAction?.actionType)}
+          </div>
+          {actionTarget && (
+            <div className="flex justify-center">
+              {actionTarget}
+            </div>
+          )}
         </div>
       )}
       {/* Suggestion-only label when no linked alert */}
@@ -256,6 +277,45 @@ function AssessmentResult({ assessment, onAction, alertId }: AssessmentResultPro
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function formatCompletedActionLabel(actionType?: string): string {
+  switch (actionType) {
+    case 'add_comment':
+      return 'Comment added';
+    case 'change_state':
+      return 'State updated';
+    case 'escalate_priority':
+      return 'Priority updated';
+    case 'reassign_issue':
+      return 'Issue reassigned';
+    case 'flag_issue':
+      return 'Issue flagged';
+    default:
+      return 'Action completed';
+  }
+}
+
+function ActionTargetSummary({ proposedAction }: { proposedAction: FleetGraphProposedAction }) {
+  const { data } = useDocumentContextQuery(proposedAction.targetEntityId);
+  const target = data?.current;
+  const targetLabel = target
+    ? target.ticket_number
+      ? `#${target.ticket_number} ${target.title}`
+      : target.title
+    : `${proposedAction.targetEntityType}:${proposedAction.targetEntityId.slice(0, 8)}`;
+
+  return (
+    <div className="text-[10px] text-muted">
+      <span className="mr-1">Target:</span>
+      <a
+        href={`/documents/${proposedAction.targetEntityId}`}
+        className="text-accent hover:underline"
+      >
+        {targetLabel}
+      </a>
     </div>
   );
 }
@@ -492,27 +552,41 @@ export function FleetGraphChat({
   // Hydrate from DB thread on mount / when thread data arrives
   const hydrated = useRef(false);
   useEffect(() => {
-    if (hydrated.current) return;
     if (!threadQuery.data) return;
-    if (messages.length > 0) {
-      hydrated.current = true;
+
+    const { thread, messages: dbMessages } = threadQuery.data;
+    if (!thread) return;
+    const isCurrentThread = threadId === null || thread.id === threadId;
+
+    if (!isCurrentThread) {
       return;
     }
 
-    const { thread, messages: dbMessages } = threadQuery.data;
-    if (thread) {
-      setThreadId(thread.id);
-      if (dbMessages.length > 0) {
-        setMessages(dbMessages);
-        console.log(`${LOG_PREFIX} hydrated messages`, {
-          threadId: thread.id,
-          count: dbMessages.length,
-          messages: dbMessages,
-        });
+    const shouldInitialHydrate = !hydrated.current && messages.length === 0;
+    const shouldSyncLateDbMessages = hydrated.current
+      && !chat.isPending
+      && thread.id === threadId
+      && dbMessages.length > messages.length;
+
+    if (!shouldInitialHydrate && !shouldSyncLateDbMessages) {
+      if (!hydrated.current && threadId === null) {
+        setThreadId(thread.id);
+        hydrated.current = true;
       }
+      return;
+    }
+
+    setThreadId(thread.id);
+    if (dbMessages.length > 0) {
+      setMessages(dbMessages);
+      console.log(`${LOG_PREFIX} hydrated messages`, {
+        threadId: thread.id,
+        count: dbMessages.length,
+        messages: dbMessages,
+      });
     }
     hydrated.current = true;
-  }, [messages.length, threadQuery.data]);
+  }, [chat.isPending, messages.length, threadId, threadQuery.data]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -565,8 +639,9 @@ export function FleetGraphChat({
     console.log(`${LOG_PREFIX} user message`, userMsg);
     setQuestion('');
 
+    const livePageContext = buildLivePageContext(pageContext);
+
     try {
-      const livePageContext = buildLivePageContext(pageContext);
       const result = await chat.mutateAsync({
         entityType,
         entityId,
@@ -597,9 +672,19 @@ export function FleetGraphChat({
         setMessages((prev) => [...prev, assistantMessage]);
         console.log(`${LOG_PREFIX} assistant message`, assistantMessage);
       }
-    } catch {
+    } catch (err) {
       const currentKey = `${entityFenceRef.current.entityType}:${entityFenceRef.current.entityId}`;
       if (callerKey !== currentKey) return;
+
+      console.error(`${LOG_PREFIX} request failed`, {
+        entityType,
+        entityId,
+        workspaceId,
+        threadId,
+        question: q.trim(),
+        pageRoute: livePageContext?.route ?? null,
+        error: err instanceof Error ? err.message : String(err),
+      });
 
       const errorMsg: FleetGraphChatMessage = {
         role: 'assistant',

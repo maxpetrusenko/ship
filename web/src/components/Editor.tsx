@@ -942,6 +942,8 @@ export function Editor({
             <div
               className="tiptap-wrapper"
               data-testid="tiptap-editor"
+              data-document-id={documentId}
+              data-fleetgraph-editor="document"
               onContextMenu={(e) => {
                 if (!editor || editor.state.selection.empty) return;
                 e.preventDefault();

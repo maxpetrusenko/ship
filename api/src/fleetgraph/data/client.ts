@@ -7,7 +7,10 @@
 
 import { ShipApiError } from './types.js';
 
-const DEFAULT_BASE_URL = 'http://localhost:3000';
+function getDefaultBaseUrl(): string {
+  const port = process.env.PORT || '3000';
+  return `http://localhost:${port}`;
+}
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 1;
 
@@ -24,7 +27,7 @@ export class ShipApiClient {
     baseUrl?: string,
     apiToken?: string,
   ) {
-    this.baseUrl = (baseUrl ?? process.env.SHIP_API_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    this.baseUrl = (baseUrl ?? process.env.SHIP_API_BASE_URL ?? getDefaultBaseUrl()).replace(/\/$/, '');
     this.apiToken = apiToken ?? process.env.FLEETGRAPH_API_TOKEN ?? '';
 
     if (!this.apiToken) {

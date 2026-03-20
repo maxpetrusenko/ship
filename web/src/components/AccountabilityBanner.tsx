@@ -15,9 +15,16 @@ interface AccountabilityBannerProps {
   onBannerClick: () => void;
   isCelebrating?: boolean;
   urgency?: 'overdue' | 'due_today';
+  messageOverride?: string;
 }
 
-export function AccountabilityBanner({ itemCount, onBannerClick, isCelebrating = false, urgency = 'overdue' }: AccountabilityBannerProps) {
+export function AccountabilityBanner({
+  itemCount,
+  onBannerClick,
+  isCelebrating = false,
+  urgency = 'overdue',
+  messageOverride,
+}: AccountabilityBannerProps) {
   // During celebration, show even if count is 0.
   if (itemCount === 0 && !isCelebrating) {
     return null;
@@ -57,7 +64,7 @@ export function AccountabilityBanner({ itemCount, onBannerClick, isCelebrating =
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
       <span className="text-sm font-medium">
-        {formatBannerMessage(itemCount, urgency)}
+        {messageOverride ?? formatBannerMessage(itemCount, urgency)}
       </span>
       <span className={`flex h-6 min-w-6 items-center justify-center rounded-full ${badgeColor} px-2 text-xs font-bold`}>
         {itemCount}

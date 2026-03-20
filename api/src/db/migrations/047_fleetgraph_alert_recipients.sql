@@ -1,7 +1,7 @@
 -- FleetGraph alert recipients: per-user notification state (read, dismiss, snooze).
 -- Decouples notification lifecycle from global alert status.
 
-CREATE TABLE fleetgraph_alert_recipients (
+CREATE TABLE IF NOT EXISTS fleetgraph_alert_recipients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   alert_id UUID NOT NULL REFERENCES fleetgraph_alerts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id),
@@ -15,6 +15,6 @@ CREATE TABLE fleetgraph_alert_recipients (
 );
 
 -- Partial index: fast lookup for unread, visible recipients per user
-CREATE INDEX idx_fleetgraph_alert_recipients_unread
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_alert_recipients_unread
   ON fleetgraph_alert_recipients (user_id, read_at)
   WHERE dismissed_at IS NULL AND snoozed_until IS NULL;

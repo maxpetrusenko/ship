@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
-import { clearQuietCsrfToken, useFleetGraphChat } from './useFleetGraph';
+import { clearCsrfToken } from '@/lib/api';
+import { issueKeys } from '@/hooks/useIssuesQuery';
+import { clearQuietCsrfToken, useFleetGraphChat, useFleetGraphResolve } from './useFleetGraph';
 
 const realFetch = globalThis.fetch;
 
@@ -14,9 +16,11 @@ function createWrapper() {
     },
   });
 
-  return function Wrapper({ children }: PropsWithChildren) {
+  const wrapper = function Wrapper({ children }: PropsWithChildren) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   };
+
+  return { queryClient, wrapper };
 }
 
 function jsonResponse(data: unknown, status = 200): Promise<Response> {
@@ -31,6 +35,7 @@ function jsonResponse(data: unknown, status = 200): Promise<Response> {
 describe('useFleetGraphChat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearCsrfToken();
     clearQuietCsrfToken();
     globalThis.fetch = realFetch;
   });
@@ -56,8 +61,9 @@ describe('useFleetGraphChat', () => {
 
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
+    const { wrapper } = createWrapper();
     const { result } = renderHook(() => useFleetGraphChat(), {
-      wrapper: createWrapper(),
+      wrapper,
     });
 
     let response;
@@ -82,5 +88,76 @@ describe('useFleetGraphChat', () => {
     expect((secondPost?.[1] as RequestInit | undefined)?.headers).toMatchObject({
       'X-CSRF-Token': 'csrf-2',
     });
+  });
+
+  it('preserves HTTP status and server error detail when chat POST fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(await jsonResponse({ token: 'csrf-1' }))
+      .mockResolvedValueOnce(await jsonResponse({ error: 'FleetGraph chat runtime failed' }, 502));
+
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useFleetGraphChat(), {
+      wrapper,
+    });
+
+    let thrown: unknown;
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          entityType: 'issue',
+          entityId: 'iss-1',
+          workspaceId: 'ws-1',
+          question: 'What changed?',
+        });
+      } catch (err) {
+        thrown = err;
+      }
+    });
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(
+      'FleetGraph chat request failed (502): FleetGraph chat runtime failed',
+    );
+  });
+});
+
+describe('useFleetGraphResolve', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearCsrfToken();
+    clearQuietCsrfToken();
+    globalThis.fetch = realFetch;
+  });
+
+  it('invalidates modal and issue/document queries after approve succeeds', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(await jsonResponse({ token: 'csrf-1' }))
+      .mockResolvedValueOnce(await jsonResponse({ success: true }));
+
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    const { queryClient, wrapper } = createWrapper();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    const { result } = renderHook(() => useFleetGraphResolve(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        alertId: 'alert-1',
+        outcome: 'approve',
+        targetEntityType: 'issue',
+        targetEntityId: 'iss-1',
+      });
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['fleetgraph'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['fleetgraph', 'alerts-all'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['fleetgraph', 'modal-feed'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['document', 'iss-1'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueKeys.detail('iss-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: issueKeys.lists() });
   });
 });

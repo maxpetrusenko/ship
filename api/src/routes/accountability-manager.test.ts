@@ -225,12 +225,14 @@ describe('Manager Accountability Action Items', () => {
 
     it('should not return items after direct report posts standup', async () => {
       // Create a standup for today from the report user
+      // Explicitly set created_at to the faked clock because vi.useFakeTimers
+      // only affects JS Date, not the database's DEFAULT now().
       await pool.query(
-        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by, parent_id, properties)
-         VALUES ($1, 'standup', 'Daily Standup', 'workspace', $2, $3, $4)`,
+        `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by, parent_id, properties, created_at)
+         VALUES ($1, 'standup', 'Daily Standup', 'workspace', $2, $3, $4, $5)`,
         [testWorkspaceId, reportUserId, testSprintId, JSON.stringify({
           author_id: reportUserId,
-        })]
+        }), fixedNow.toISOString()]
       );
 
       const res = await request(app)

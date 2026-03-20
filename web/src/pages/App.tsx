@@ -17,7 +17,7 @@ import { issueKeys } from '@/hooks/useIssuesQuery';
 import { programKeys } from '@/hooks/useProgramsQuery';
 import { useStandupStatusQuery } from '@/hooks/useStandupStatusQuery';
 import { useActionItemsQuery, actionItemsKeys } from '@/hooks/useActionItemsQuery';
-import { fleetgraphKeys } from '@/hooks/useFleetGraph';
+import { fleetgraphKeys, useFleetGraphModalFeed } from '@/hooks/useFleetGraph';
 import { useTeamMembersQuery } from '@/hooks/useTeamMembersQuery';
 import { cn, getContrastTextColor } from '@/lib/cn';
 import { buildDocumentTree, DocumentTreeNode } from '@/lib/documentTree';
@@ -35,7 +35,7 @@ import { ContextTreeNav } from '@/components/ContextTreeNav';
 import { ProjectSetupWizard, ProjectSetupData } from '@/components/ProjectSetupWizard';
 import { SelectionPersistenceProvider } from '@/contexts/SelectionPersistenceContext';
 import { ActionItemsModal } from '@/components/ActionItemsModal';
-import { AccountabilityBanner } from '@/components/AccountabilityBanner';
+import { TopAttentionBanners } from '@/components/TopAttentionBanners';
 import { ProjectContextSidebar } from '@/components/sidebars/ProjectContextSidebar';
 import { FleetGraphFloatingChat } from '@/components/fleetgraph/FleetGraphFloatingChat';
 import FleetGraphNotificationBell from '@/components/fleetgraph/FleetGraphNotificationBell';
@@ -83,6 +83,10 @@ export function AppLayout() {
   const hasActionItems = (actionItemsData?.items?.length ?? 0) > 0;
   const queryClient = useQueryClient();
 
+  // FleetGraph modal feed (proactive findings for the modal)
+  const { data: fleetGraphModalData } = useFleetGraphModalFeed();
+  const hasFleetGraphItems = (fleetGraphModalData?.items?.length ?? 0) > 0;
+
   // Celebration state for when user completes an accountability item
   const [isCelebrating, setIsCelebrating] = useState(false);
   const celebrationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,11 +112,12 @@ export function AppLayout() {
 
   useRealtimeEvent('accountability:updated', handleAccountabilityUpdate);
 
-  // Listen for realtime FleetGraph alerts - only invalidate status here;
+  // Listen for realtime FleetGraph alerts - invalidate status + modal feed;
   // FleetGraphPanel handles its own scoped alerts invalidation to avoid
   // duplicate/unrelated refetches across all entity panels.
   const handleFleetGraphAlert = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: fleetgraphKeys.status() });
+    queryClient.invalidateQueries({ queryKey: fleetgraphKeys.modalFeed() });
   }, [queryClient]);
 
   useRealtimeEvent('fleetgraph:alert', handleFleetGraphAlert);
@@ -127,14 +132,16 @@ export function AppLayout() {
   }, []);
 
   // Show action items modal on initial load if there are pending items
+  // (accountability OR FleetGraph findings).
   // Disabled when localStorage flag is set (used by E2E tests to avoid blocking interactions)
   useEffect(() => {
     if (localStorage.getItem('ship:disableActionItemsModal') === 'true') return;
-    if (!actionItemsModalShownOnLoad && hasActionItems && actionItemsData?.items) {
+    const hasContent = hasActionItems || hasFleetGraphItems;
+    if (!actionItemsModalShownOnLoad && hasContent) {
       setActionItemsModalOpen(true);
       setActionItemsModalShownOnLoad(true);
     }
-  }, [actionItemsModalShownOnLoad, hasActionItems, actionItemsData?.items]);
+  }, [actionItemsModalShownOnLoad, hasActionItems, hasFleetGraphItems]);
 
   // Accessibility: focus management on navigation
   useFocusOnNavigate();
@@ -298,12 +305,14 @@ export function AppLayout() {
         </div>
       )}
 
-      {/* Accountability banner - persistent until all items complete */}
-      <AccountabilityBanner
-        itemCount={actionItemsData?.items?.length ?? 0}
-        onBannerClick={() => setActionItemsModalOpen(true)}
+      {/* Top attention region: accountability first, FleetGraph second */}
+      <TopAttentionBanners
+        accountabilityItemCount={actionItemsData?.items?.length ?? 0}
+        accountabilityUrgency={actionItemsData?.has_overdue ? 'overdue' : 'due_today'}
+        fleetGraphItems={fleetGraphModalData?.items ?? []}
+        onAccountabilityClick={() => setActionItemsModalOpen(true)}
+        onFleetGraphClick={() => setActionItemsModalOpen(true)}
         isCelebrating={isCelebrating}
-        urgency={actionItemsData?.has_overdue ? 'overdue' : 'due_today'}
       />
 
       <div className="flex flex-1 overflow-hidden">

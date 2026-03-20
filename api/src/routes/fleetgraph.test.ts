@@ -9,14 +9,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import type { FleetGraphAlert, FleetGraphApproval, FleetGraphRunState } from '@ship/shared';
+import type {
+  FleetGraphAlert,
+  FleetGraphApproval,
+  FleetGraphPageContext,
+  FleetGraphRunState,
+} from '@ship/shared';
 import type { FleetGraphChatRuntimeResult } from '../fleetgraph/chat/types.js';
+import { resetUserBurstRateLimit } from '../services/user-burst-rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks (must be declared before the module under test is imported)
 // ---------------------------------------------------------------------------
 
 const {
+  mockPoolQuery,
   mockResolveAlert,
   mockGetAlertsByEntity,
   mockGetActiveAlerts,
@@ -41,7 +48,11 @@ const {
   mockSnoozeRecipient,
   mockRunFleetGraphChat,
   mockIsFleetGraphReady,
+  mockCreateRecipients,
+  mockCreateApproval,
+  mockExecuteShipAction,
 } = vi.hoisted(() => ({
+  mockPoolQuery: vi.fn(),
   mockResolveAlert: vi.fn(),
   mockGetAlertsByEntity: vi.fn(),
   mockGetActiveAlerts: vi.fn(),
@@ -66,9 +77,12 @@ const {
   mockSnoozeRecipient: vi.fn(),
   mockRunFleetGraphChat: vi.fn(),
   mockIsFleetGraphReady: vi.fn(),
+  mockCreateRecipients: vi.fn(),
+  mockCreateApproval: vi.fn(),
+  mockExecuteShipAction: vi.fn(),
 }));
 
-vi.mock('../db/client.js', () => ({ pool: {} }));
+vi.mock('../db/client.js', () => ({ pool: { query: mockPoolQuery } }));
 
 vi.mock('../middleware/auth.js', () => ({
   authMiddleware: (
@@ -107,6 +121,12 @@ vi.mock('../fleetgraph/runtime/index.js', () => ({
   markRecipientsRead: mockMarkRecipientsRead,
   dismissRecipient: mockDismissRecipient,
   snoozeRecipient: mockSnoozeRecipient,
+  createRecipients: mockCreateRecipients,
+  createApproval: mockCreateApproval,
+}));
+
+vi.mock('../fleetgraph/data/fetchers.js', () => ({
+  executeShipAction: mockExecuteShipAction,
 }));
 
 vi.mock('../fleetgraph/bootstrap.js', () => ({
@@ -251,7 +271,9 @@ function makeChatRuntimeResult(
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  resetUserBurstRateLimit('fleetgraph-chat');
   vi.clearAllMocks();
+  mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 });
   mockIsFleetGraphReady.mockReturnValue(true);
   mockIsEntityAnalysisStale.mockResolvedValue(true);
   mockGetUserAlerts.mockResolvedValue([]);
@@ -493,6 +515,9 @@ interface FleetGraphThreadFixture {
   lastPageSurface: string | null;
   lastPageDocumentId: string | null;
   lastPageTitle: string | null;
+  lastPageContext: FleetGraphPageContext | null;
+  entityType: string | null;
+  entityId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -506,6 +531,9 @@ const makeThread = (overrides: Partial<FleetGraphThreadFixture> = {}): FleetGrap
   lastPageSurface: null,
   lastPageDocumentId: null,
   lastPageTitle: null,
+  lastPageContext: null,
+  entityType: null,
+  entityId: null,
   createdAt: '2025-01-01T00:00:00.000Z',
   updatedAt: '2025-01-01T00:00:00.000Z',
   ...overrides,
@@ -513,6 +541,13 @@ const makeThread = (overrides: Partial<FleetGraphThreadFixture> = {}): FleetGrap
 
 describe('POST /api/fleetgraph/chat', () => {
   const app = createTestApp();
+  const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  beforeEach(() => {
+    process.env.FLEETGRAPH_CHAT_RATE_LIMIT_MAX = '100';
+    process.env.FLEETGRAPH_CHAT_RATE_LIMIT_WINDOW_MS = '60000';
+    consoleErrorSpy.mockClear();
+  });
 
   it('passes prior conversation history from DB without duplicating the current question', async () => {
     mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
@@ -686,6 +721,32 @@ describe('POST /api/fleetgraph/chat', () => {
     expect(res.body.message.content).toBe('Workspace summary');
   });
 
+  it('reuses the workspace-global thread for an entity-scoped first turn', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread({ id: 'thread-ws' }));
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockRunFleetGraphChat.mockResolvedValue(makeChatRuntimeResult());
+    mockGetAlertsByEntity.mockResolvedValue([]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({
+        entityType: 'issue',
+        entityId: 'iss-1',
+        workspaceId: 'ws-1',
+        question: 'What changed?',
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockGetOrCreateActiveThread).toHaveBeenCalledWith(
+      expect.anything(),
+      'ws-1',
+      'user-1',
+      undefined,
+      undefined,
+    );
+  });
+
   it('threads page context into graph invocation for chat turns', async () => {
     mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
     mockLoadRecentMessages.mockResolvedValue([]);
@@ -712,13 +773,15 @@ describe('POST /api/fleetgraph/chat', () => {
     }));
     mockGetAlertsByEntity.mockResolvedValue([]);
 
-    const pageContext = {
+    const pageContext: FleetGraphPageContext = {
       route: '/documents/proj-1/details',
       surface: 'project',
+      documentId: 'proj-1',
       title: 'Infrastructure - Bug Fixes',
       tab: 'details',
       tabLabel: 'Details',
-    } as const;
+      visibleContentText: 'Active blockers and owner notes',
+    };
 
     const res = await request(app)
       .post('/api/fleetgraph/chat')
@@ -741,6 +804,81 @@ describe('POST /api/fleetgraph/chat', () => {
       'thread-1',
       pageContext,
     );
+  });
+
+  it('rehydrates the latest stored page context when a follow-up turn omits it', async () => {
+    const storedPageContext: FleetGraphPageContext = {
+      route: '/documents/proj-1/details',
+      surface: 'project',
+      documentId: 'proj-1',
+      title: 'Infrastructure - Bug Fixes',
+      tab: 'details',
+      tabLabel: 'Details',
+      visibleContentText: 'Active blockers and owner notes',
+    };
+
+    mockGetThreadById.mockResolvedValue(makeThread({
+      id: 'thread-1',
+      lastPageRoute: storedPageContext.route,
+      lastPageSurface: storedPageContext.surface,
+      lastPageDocumentId: storedPageContext.documentId ?? null,
+      lastPageTitle: storedPageContext.title ?? null,
+      lastPageContext: storedPageContext,
+      entityType: 'project',
+      entityId: 'proj-1',
+    }));
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockRunFleetGraphChat.mockResolvedValue(makeChatRuntimeResult());
+    mockGetAlertsByEntity.mockResolvedValue([]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({
+        threadId: 'thread-1',
+        entityType: 'issue',
+        entityId: 'iss-9',
+        workspaceId: 'ws-1',
+        question: 'what page im on',
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockRunFleetGraphChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        entityType: 'issue',
+        entityId: 'iss-9',
+        pageContext: storedPageContext,
+      }),
+    );
+    expect(mockUpdateThreadPageContext).not.toHaveBeenCalled();
+  });
+
+  it('returns 429 when a user hammers the chat endpoint too often', async () => {
+    process.env.FLEETGRAPH_CHAT_RATE_LIMIT_MAX = '2';
+    process.env.FLEETGRAPH_CHAT_RATE_LIMIT_WINDOW_MS = '60000';
+
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockRunFleetGraphChat.mockResolvedValue(makeChatRuntimeResult());
+    mockGetAlertsByEntity.mockResolvedValue([]);
+
+    const payload = {
+      entityType: 'issue',
+      entityId: 'iss-1',
+      workspaceId: 'ws-1',
+      question: 'What changed?',
+    };
+
+    const first = await request(app).post('/api/fleetgraph/chat').send(payload);
+    const second = await request(app).post('/api/fleetgraph/chat').send(payload);
+    const third = await request(app).post('/api/fleetgraph/chat').send(payload);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(429);
+    expect(third.body.error).toMatch(/rate limit/i);
+    expect(mockRunFleetGraphChat).toHaveBeenCalledTimes(2);
   });
 
   it('returns confirm_action branch from graph assessment', async () => {
@@ -780,14 +918,16 @@ describe('POST /api/fleetgraph/chat', () => {
         timestamp: '2025-01-01T00:00:01.000Z',
       },
     }));
-    mockGetAlertsByEntity.mockResolvedValue([
-      makeAlert({
-        id: 'chat-alert-1',
-        signalType: 'chat_suggestion',
-        summary: 'This issue should be reassigned.',
-        recommendation: 'Ask for approval to reassign.',
-      }),
-    ]);
+    const chatAlert = makeAlert({
+      id: 'chat-alert-1',
+      signalType: 'chat_suggestion',
+      summary: 'This issue should be reassigned.',
+      recommendation: 'Ask for approval to reassign.',
+    });
+    mockUpsertAlert.mockResolvedValue(chatAlert);
+    mockCreateRecipients.mockResolvedValue(undefined);
+    mockCreateApproval.mockResolvedValue({ id: 'appr-chat-1' });
+    mockGetAlertsByEntity.mockResolvedValue([chatAlert]);
 
     const res = await request(app)
       .post('/api/fleetgraph/chat')
@@ -901,6 +1041,272 @@ describe('POST /api/fleetgraph/chat', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('Thread not found');
   });
+
+  it('logs chat request context when post-runtime persistence fails', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread({ id: 'thread-ctx' }));
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockRunFleetGraphChat.mockResolvedValue(makeChatRuntimeResult({
+      traceUrl: 'https://smith.langchain.com/public/chat-run-ctx/r',
+      toolCalls: [
+        {
+          name: 'fetch_issue_context',
+          callId: 'call-1',
+          arguments: { issueId: 'iss-1' },
+          result: { found: true },
+        },
+      ],
+    }));
+    mockGetAlertsByEntity.mockResolvedValue([]);
+    mockAppendChatMessage.mockRejectedValueOnce(new Error('insert failed'));
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({
+        entityType: 'issue',
+        entityId: 'iss-1',
+        workspaceId: 'ws-1',
+        question: 'Check ownership gaps',
+        pageContext: {
+          route: '/documents/iss-1/details',
+          surface: 'issue',
+          documentId: 'iss-1',
+          title: 'Issue title',
+        },
+      });
+
+    expect(res.status).toBe(500);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[FleetGraph] chat error:',
+      expect.objectContaining({
+        request: expect.objectContaining({
+          userId: 'user-1',
+          workspaceId: 'ws-1',
+          threadId: 'thread-ctx',
+          entityType: 'issue',
+          entityId: 'iss-1',
+          question: 'Check ownership gaps',
+          pageRoute: '/documents/iss-1/details',
+          historyCount: 0,
+        }),
+        runtime: expect.objectContaining({
+          branch: 'inform_only',
+          traceUrl: 'https://smith.langchain.com/public/chat-run-ctx/r',
+          toolNames: ['fetch_issue_context'],
+        }),
+        error: expect.objectContaining({
+          message: 'insert failed',
+        }),
+      }),
+    );
+  });
+});
+
+describe('POST /api/fleetgraph/chat (confirm_action alert creation)', () => {
+  const app = createTestApp();
+
+  it('creates alert + approval when chat returns confirm_action with proposedAction', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+
+    const proposedAction = {
+      actionType: 'escalate_priority',
+      targetEntityType: 'issue' as const,
+      targetEntityId: 'iss-1',
+      description: 'Escalate priority to high',
+      payload: { priority: 'high' },
+    };
+    mockRunFleetGraphChat.mockResolvedValueOnce(makeChatRuntimeResult({
+      assessment: {
+        summary: 'This issue should be escalated.',
+        recommendation: 'Escalate priority to high.',
+        branch: 'confirm_action',
+        proposedAction,
+        citations: [],
+      },
+      message: {
+        role: 'assistant',
+        content: 'This issue should be escalated.',
+        timestamp: '2025-01-01T00:00:01.000Z',
+      },
+      toolCalls: [],
+    }));
+
+    const createdAlert = makeAlert({ id: 'new-alert-1', signalType: 'chat_suggestion', summary: 'This issue should be escalated.', recommendation: 'Escalate priority to high.' });
+    mockUpsertAlert.mockResolvedValue(createdAlert);
+    mockCreateRecipients.mockResolvedValue(undefined);
+    mockCreateApproval.mockResolvedValue({ id: 'approval-1' });
+    mockGetAlertsByEntity.mockResolvedValue([createdAlert]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({ entityType: 'issue', entityId: 'iss-1', workspaceId: 'ws-1', question: 'Should we escalate?' });
+
+    expect(res.status).toBe(200);
+    // Alert was created
+    expect(mockUpsertAlert).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signalType: 'chat_suggestion',
+        entityType: 'issue',
+        entityId: 'iss-1',
+        summary: 'This issue should be escalated.',
+      }),
+    );
+    // Recipients were created
+    expect(mockCreateRecipients).toHaveBeenCalledWith(expect.anything(), 'new-alert-1', ['user-1']);
+    // Approval was created with proposed action details
+    expect(mockCreateApproval).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        alertId: 'new-alert-1',
+        actionType: 'escalate_priority',
+        targetEntityType: 'issue',
+        targetEntityId: 'iss-1',
+        description: 'Escalate priority to high',
+        status: 'pending',
+      }),
+    );
+    // Response includes alertId on the message
+    expect(res.body.message.alertId).toBe('new-alert-1');
+  });
+
+  it('adds an explicitly mentioned workspace recipient for chat suggestions', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [
+        { id: 'user-2', email: 'grace.lee@ship.local', name: 'Grace Lee' },
+        { id: 'user-3', email: 'alice.chen@ship.local', name: 'Alice Chen' },
+      ],
+    });
+
+    mockRunFleetGraphChat.mockResolvedValueOnce(makeChatRuntimeResult({
+      assessment: {
+        summary: 'Grace Lee should be notified about the blocked sprint risk.',
+        recommendation: 'Send the alert to Grace Lee for follow-up.',
+        branch: 'confirm_action',
+        proposedAction: {
+          actionType: 'add_comment',
+          targetEntityType: 'workspace',
+          targetEntityId: 'ws-1',
+          description: 'Notify Grace Lee about blocked sprint risk',
+          payload: { content: 'Blocked sprint risk due to stale high-priority tickets.' },
+        },
+        citations: [],
+      },
+      message: {
+        role: 'assistant',
+        content: 'I can alert Grace Lee about the blocked sprint risk.',
+        timestamp: '2025-01-01T00:00:01.000Z',
+      },
+      toolCalls: [],
+    }));
+
+    const createdAlert = makeAlert({
+      id: 'new-alert-2',
+      signalType: 'chat_suggestion',
+      entityType: 'workspace',
+      entityId: 'ws-1',
+      summary: 'Grace Lee should be notified about the blocked sprint risk.',
+    });
+    mockUpsertAlert.mockResolvedValue(createdAlert);
+    mockCreateRecipients.mockResolvedValue(undefined);
+    mockCreateApproval.mockResolvedValue({ id: 'approval-2' });
+    mockGetAlertsByEntity.mockResolvedValue([createdAlert]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({
+        entityType: 'workspace',
+        entityId: 'ws-1',
+        workspaceId: 'ws-1',
+        question: 'Send an alert to Grace Lee about blocked sprint risk.',
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockPoolQuery).toHaveBeenCalledWith(
+      expect.stringContaining('FROM workspace_memberships'),
+      ['ws-1'],
+    );
+    expect(mockCreateRecipients).toHaveBeenCalledWith(
+      expect.anything(),
+      'new-alert-2',
+      ['user-1', 'user-2'],
+    );
+  });
+
+  it('falls back to the actor when no explicit workspace recipient matches', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockPoolQuery.mockResolvedValueOnce({
+      rows: [{ id: 'user-3', email: 'alice.chen@ship.local', name: 'Alice Chen' }],
+    });
+
+    mockRunFleetGraphChat.mockResolvedValueOnce(makeChatRuntimeResult({
+      assessment: {
+        summary: 'This blocked sprint risk should be surfaced.',
+        recommendation: 'Send the alert so the team can react.',
+        branch: 'confirm_action',
+        proposedAction: {
+          actionType: 'add_comment',
+          targetEntityType: 'workspace',
+          targetEntityId: 'ws-1',
+          description: 'Notify the team about blocked sprint risk',
+          payload: { content: 'Blocked sprint risk due to stale high-priority tickets.' },
+        },
+        citations: [],
+      },
+      message: {
+        role: 'assistant',
+        content: 'I can send that alert.',
+        timestamp: '2025-01-01T00:00:01.000Z',
+      },
+      toolCalls: [],
+    }));
+
+    const createdAlert = makeAlert({
+      id: 'new-alert-3',
+      signalType: 'chat_suggestion',
+      entityType: 'workspace',
+      entityId: 'ws-1',
+    });
+    mockUpsertAlert.mockResolvedValue(createdAlert);
+    mockCreateRecipients.mockResolvedValue(undefined);
+    mockCreateApproval.mockResolvedValue({ id: 'approval-3' });
+    mockGetAlertsByEntity.mockResolvedValue([createdAlert]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({
+        entityType: 'workspace',
+        entityId: 'ws-1',
+        workspaceId: 'ws-1',
+        question: 'Send an alert to Grace Lee about blocked sprint risk.',
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockCreateRecipients).toHaveBeenCalledWith(expect.anything(), 'new-alert-3', ['user-1']);
+  });
+
+  it('does not create alert for inform_only responses', async () => {
+    mockGetOrCreateActiveThread.mockResolvedValue(makeThread());
+    mockLoadRecentMessages.mockResolvedValue([]);
+    mockAppendChatMessage.mockResolvedValue(undefined);
+    mockRunFleetGraphChat.mockResolvedValueOnce(makeChatRuntimeResult());
+    mockGetAlertsByEntity.mockResolvedValue([]);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/chat')
+      .send({ entityType: 'issue', entityId: 'iss-1', workspaceId: 'ws-1', question: 'Is it stale?' });
+
+    expect(res.status).toBe(200);
+    expect(mockUpsertAlert).not.toHaveBeenCalled();
+    expect(mockCreateRecipients).not.toHaveBeenCalled();
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
 });
 
 // ===========================================================================
@@ -933,6 +1339,22 @@ describe('GET /api/fleetgraph/chat/thread', () => {
     expect(res.body.thread).toBeNull();
     expect(res.body.messages).toEqual([]);
   });
+
+  it('stays workspace-global even when the page sends entity scope query params', async () => {
+    mockGetActiveThread.mockResolvedValue(makeThread({ id: 'thread-ws' }));
+    mockLoadRecentMessages.mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/fleetgraph/chat/thread')
+      .query({ entityType: 'issue', entityId: 'iss-1' });
+
+    expect(res.status).toBe(200);
+    const [, workspaceId, userId, entityType, entityId] = mockGetActiveThread.mock.calls[0] ?? [];
+    expect(workspaceId).toBe('ws-1');
+    expect(userId).toBe('user-1');
+    expect(entityType).toBeUndefined();
+    expect(entityId).toBeUndefined();
+  });
 });
 
 // ===========================================================================
@@ -950,6 +1372,21 @@ describe('POST /api/fleetgraph/chat/thread', () => {
     expect(res.status).toBe(200);
     expect(res.body.thread.id).toBe('thread-new');
     expect(mockCreateThread).toHaveBeenCalledWith(expect.anything(), 'ws-1', 'user-1', undefined, undefined);
+  });
+
+  it('rejects half-scoped payloads', async () => {
+    const missingEntityId = await request(app)
+      .post('/api/fleetgraph/chat/thread')
+      .send({ entityType: 'issue' });
+    const missingEntityType = await request(app)
+      .post('/api/fleetgraph/chat/thread')
+      .send({ entityId: 'iss-1' });
+
+    expect(missingEntityId.status).toBe(400);
+    expect(missingEntityId.body.error).toMatch(/entityType and entityId must be provided together/i);
+    expect(missingEntityType.status).toBe(400);
+    expect(missingEntityType.body.error).toMatch(/entityType and entityId must be provided together/i);
+    expect(mockCreateThread).not.toHaveBeenCalled();
   });
 });
 
@@ -1254,6 +1691,110 @@ describe('POST /api/fleetgraph/alerts/:id/resolve', () => {
 });
 
 // ===========================================================================
+// POST /api/fleetgraph/alerts/:id/resolve (chat suggestion path)
+// ===========================================================================
+
+describe('POST /api/fleetgraph/alerts/:id/resolve (chat suggestion)', () => {
+  const app = createTestApp();
+
+  function makeChatApproval(overrides: Partial<FleetGraphApproval> = {}): FleetGraphApproval {
+    return makeApproval({
+      id: 'appr-chat-1',
+      alertId: 'chat-alert-1',
+      threadId: 'chat:thread-42',
+      actionType: 'escalate_priority',
+      targetEntityType: 'issue',
+      targetEntityId: 'iss-1',
+      description: 'Escalate priority to high',
+      payload: { priority: 'high' },
+      ...overrides,
+    });
+  }
+
+  it('approves a chat suggestion and executes action directly (no graph resume)', async () => {
+    const approval = makeChatApproval();
+    mockGetPendingApprovals.mockResolvedValue([approval]);
+    mockUpdateApprovalStatus.mockResolvedValue(makeChatApproval({ status: 'approved' }));
+    mockExecuteShipAction.mockResolvedValue(undefined);
+    const resolved = makeAlert({ id: 'chat-alert-1', status: 'resolved', signalType: 'chat_suggestion' });
+    mockResolveAlert.mockResolvedValue(resolved);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/alerts/chat-alert-1/resolve')
+      .send({ outcome: 'approve' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.alert.status).toBe('resolved');
+
+    // CAS: approved -> executed
+    expect(mockUpdateApprovalStatus).toHaveBeenCalledTimes(2);
+    expect(mockUpdateApprovalStatus).toHaveBeenNthCalledWith(
+      1, expect.anything(), 'appr-chat-1', 'approved', 'user-1',
+    );
+    expect(mockUpdateApprovalStatus).toHaveBeenNthCalledWith(
+      2, expect.anything(), 'appr-chat-1', 'executed', 'user-1',
+    );
+
+    // Action executed directly
+    expect(mockExecuteShipAction).toHaveBeenCalledWith(
+      'ws-1', 'escalate_priority', 'issue', 'iss-1', { priority: 'high' },
+    );
+
+    // Graph should NOT be resumed for chat suggestions
+    expect(mockResumeGraph).not.toHaveBeenCalled();
+  });
+
+  it('rejects a chat suggestion without resuming the graph', async () => {
+    const approval = makeChatApproval();
+    mockGetPendingApprovals.mockResolvedValue([approval]);
+    mockUpdateApprovalStatus.mockResolvedValue(makeChatApproval({ status: 'dismissed' }));
+    const rejected = makeAlert({ id: 'chat-alert-1', status: 'rejected', signalType: 'chat_suggestion' });
+    mockResolveAlert.mockResolvedValue(rejected);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/alerts/chat-alert-1/resolve')
+      .send({ outcome: 'reject' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.alert.status).toBe('rejected');
+
+    // Approval dismissed
+    expect(mockUpdateApprovalStatus).toHaveBeenCalledWith(
+      expect.anything(), 'appr-chat-1', 'dismissed', 'user-1',
+    );
+
+    // Graph should NOT be resumed for chat suggestions
+    expect(mockResumeGraph).not.toHaveBeenCalled();
+    expect(mockExecuteShipAction).not.toHaveBeenCalled();
+  });
+
+  it('returns 502 when chat suggestion action execution fails', async () => {
+    const approval = makeChatApproval();
+    mockGetPendingApprovals.mockResolvedValue([approval]);
+    mockUpdateApprovalStatus.mockResolvedValue(makeChatApproval({ status: 'approved' }));
+    mockExecuteShipAction.mockRejectedValue(new Error('Ship API 500'));
+
+    const res = await request(app)
+      .post('/api/fleetgraph/alerts/chat-alert-1/resolve')
+      .send({ outcome: 'approve' });
+
+    expect(res.status).toBe(502);
+    expect(res.body.success).toBe(false);
+    expect(res.body.approvalStatus).toBe('execution_failed');
+
+    // Approval marked as execution_failed
+    expect(mockUpdateApprovalStatus).toHaveBeenCalledWith(
+      expect.anything(), 'appr-chat-1', 'execution_failed', 'user-1',
+    );
+
+    // Graph should NOT be resumed
+    expect(mockResumeGraph).not.toHaveBeenCalled();
+    // Alert should NOT be resolved on failure
+    expect(mockResolveAlert).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
 // GET /api/fleetgraph/status
 // ===========================================================================
 
@@ -1300,5 +1841,72 @@ describe('GET /api/fleetgraph/status', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.alertsActive).toBe(0);
+  });
+});
+
+// ===========================================================================
+// POST /api/fleetgraph/demo/seed-flow
+// ===========================================================================
+
+describe('POST /api/fleetgraph/demo/seed-flow', () => {
+  const app = createTestApp();
+
+  it('backdates real issues, invokes stale analysis, and seeds actionable approvals', async () => {
+    mockPoolQuery
+      .mockResolvedValueOnce({
+        rows: [
+          { id: 'iss-1', title: 'Issue One', state: 'todo' },
+          { id: 'iss-2', title: 'Issue Two', state: 'in_progress' },
+          { id: 'iss-3', title: 'Issue Three', state: 'backlog' },
+        ],
+        rowCount: 3,
+      })
+      .mockResolvedValue({ rows: [], rowCount: 0 });
+    mockInvokeGraph.mockResolvedValue({
+      state: makeChatGraphState(),
+      interrupted: false,
+      threadId: 'run-demo',
+    });
+    mockUpsertAlert
+      .mockResolvedValueOnce(makeAlert({ id: 'demo-alert-1', signalType: 'chat_suggestion', entityId: 'iss-1' }))
+      .mockResolvedValueOnce(makeAlert({ id: 'demo-alert-2', signalType: 'chat_suggestion', entityId: 'iss-2' }));
+    mockCreateRecipients.mockResolvedValue(undefined);
+    mockCreateApproval.mockResolvedValue({ id: 'demo-appr-1' });
+    mockGetOrCreateActiveThread.mockResolvedValue({
+      id: 'thread-demo',
+      workspaceId: 'ws-1',
+      userId: 'user-1',
+      status: 'active',
+      lastPageRoute: null,
+      lastPageSurface: null,
+      lastPageDocumentId: null,
+      lastPageTitle: null,
+      lastPageContext: null,
+      entityType: null,
+      entityId: null,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
+    mockAppendChatMessage.mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .post('/api/fleetgraph/demo/seed-flow')
+      .send({ entityType: 'issue', entityId: 'iss-1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.seededIssueCount).toBe(3);
+    expect(res.body.seededApprovalCount).toBe(2);
+    expect(res.body.seededIssueIds).toEqual(['iss-1', 'iss-2', 'iss-3']);
+    expect(mockInvokeGraph).toHaveBeenCalledTimes(3);
+    expect(mockUpsertAlert).toHaveBeenCalledTimes(2);
+    expect(mockCreateRecipients).toHaveBeenCalledTimes(2);
+    expect(mockCreateApproval).toHaveBeenCalledTimes(2);
+    expect(mockGetOrCreateActiveThread).toHaveBeenCalledWith(
+      expect.objectContaining({ query: mockPoolQuery }),
+      'ws-1',
+      'user-1',
+    );
+    expect(mockAppendChatMessage).toHaveBeenCalledTimes(2);
+    expect(mockPoolQuery).toHaveBeenCalled();
   });
 });

@@ -1,44 +1,44 @@
 /**
- * AI-powered plan and retro quality analysis using AWS Bedrock (Claude Opus 4.5).
+ * AI-powered plan and retro quality analysis using OpenAI Responses.
  *
  * Provides two analysis functions:
  * - analyzePlan: Evaluates weekly plan items for falsifiability and workload
  * - analyzeRetro: Compares retro against plan for coverage and evidence
  *
- * Uses AWS Bedrock's Claude Opus 4.5 model via the standard credential chain.
- * Gracefully degrades when Bedrock is unavailable.
+ * Gracefully degrades when OpenAI is unavailable.
  */
 
 import { createHash } from 'crypto';
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import OpenAI from 'openai';
 import { extractText } from '../utils/document-content.js';
 
-const MODEL_ID = 'global.anthropic.claude-opus-4-5-20251101-v1:0';
-const REGION = 'us-east-1';
+const MODEL_ID =
+  process.env.SHIP_AI_ANALYSIS_MODEL
+  ?? process.env.FLEETGRAPH_CHAT_MODEL_ID
+  ?? process.env.FLEETGRAPH_MODEL_ID
+  ?? 'gpt-5.3-chat-latest';
 
-// Lazy-initialize client (fails gracefully if AWS credentials unavailable)
-let bedrockClient: BedrockRuntimeClient | null = null;
-let clientInitFailed = false;
+type AnalysisClient = Pick<OpenAI, 'responses'>;
 
-function getClient(): BedrockRuntimeClient | null {
-  if (clientInitFailed) return null;
-  if (bedrockClient) return bedrockClient;
+// Lazy-initialize client (fails gracefully if OPENAI_API_KEY is unavailable)
+let openAiClient: AnalysisClient | null = null;
+let availabilityCache: { value: boolean; checkedAt: number } | null = null;
+const AVAILABILITY_CACHE_MS = 60_000;
 
-  try {
-    bedrockClient = new BedrockRuntimeClient({ region: REGION });
-    return bedrockClient;
-  } catch (err) {
-    console.warn('Failed to initialize Bedrock client:', err);
-    clientInitFailed = true;
-    return null;
-  }
+function getClient(): AnalysisClient | null {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return null;
+  if (openAiClient) return openAiClient;
+
+  openAiClient = new OpenAI({ apiKey }) as AnalysisClient;
+  return openAiClient;
 }
 
 // Simple in-memory rate limiter with periodic cleanup
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT = 120; // max requests per hour per user (polling every 5s, but only analyzes on content change)
 const RATE_WINDOW = 60 * 60 * 1000; // 1 hour in ms
-const MAX_CONTENT_TEXT_LENGTH = 50_000; // 50KB max extracted text sent to Bedrock
+const MAX_CONTENT_TEXT_LENGTH = 50_000; // 50KB max extracted text sent to OpenAI
 
 // Periodically clean up expired entries to prevent memory leak
 setInterval(() => {
@@ -225,34 +225,104 @@ Respond ONLY with valid JSON matching this exact structure:
   "suggestions": ["<actionable suggestion 1>", "<actionable suggestion 2>"]
 }`;
 
-async function callBedrock(systemPrompt: string, userPrompt: string): Promise<string | null> {
+const PLAN_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overall_score', 'items', 'workload_assessment', 'workload_feedback'],
+  properties: {
+    overall_score: { type: 'number' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['text', 'score', 'feedback', 'issues', 'conciseness_score', 'is_verbose', 'conciseness_feedback'],
+        properties: {
+          text: { type: 'string' },
+          score: { type: 'number' },
+          feedback: { type: 'string' },
+          issues: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          conciseness_score: { type: 'number' },
+          is_verbose: { type: 'boolean' },
+          conciseness_feedback: { type: 'string' },
+        },
+      },
+    },
+    workload_assessment: {
+      type: 'string',
+      enum: ['light', 'moderate', 'heavy', 'excessive'],
+    },
+    workload_feedback: { type: 'string' },
+  },
+} as const;
+
+const RETRO_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['overall_score', 'plan_coverage', 'suggestions'],
+  properties: {
+    overall_score: { type: 'number' },
+    plan_coverage: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['plan_item', 'addressed', 'has_evidence', 'feedback'],
+        properties: {
+          plan_item: { type: 'string' },
+          addressed: { type: 'boolean' },
+          has_evidence: { type: 'boolean' },
+          feedback: { type: 'string' },
+        },
+      },
+    },
+    suggestions: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+  },
+} as const;
+
+function extractJsonPayload(text: string): string | null {
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return null;
+  }
+
+  return jsonMatch[1] || jsonMatch[0];
+}
+
+async function callOpenAi(args: {
+  schemaName: string;
+  schemaDescription: string;
+  schema: Record<string, unknown>;
+  systemPrompt: string;
+  userPrompt: string;
+}): Promise<string | null> {
   const client = getClient();
   if (!client) return null;
 
-  const body = JSON.stringify({
-    anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 2048,
-    system: systemPrompt,
-    messages: [
-      { role: 'user', content: userPrompt },
-    ],
-  });
+  const response = await client.responses.create({
+    model: MODEL_ID,
+    input: args.userPrompt,
+    instructions: args.systemPrompt,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: args.schemaName,
+        description: args.schemaDescription,
+        schema: args.schema,
+        strict: true,
+      },
+      verbosity: 'medium',
+    },
+    truncation: 'auto',
+  } as never);
 
-  const command = new InvokeModelCommand({
-    modelId: MODEL_ID,
-    contentType: 'application/json',
-    accept: 'application/json',
-    body: new TextEncoder().encode(body),
-  });
-
-  const response = await client.send(command);
-  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-  if (responseBody.content && responseBody.content[0]?.text) {
-    return responseBody.content[0].text;
-  }
-
-  return null;
+  return typeof response.output_text === 'string' ? response.output_text : null;
 }
 
 /**
@@ -281,18 +351,22 @@ export async function analyzePlan(content: unknown): Promise<PlanAnalysisResult 
   const userPrompt = `Analyze this weekly plan. Here are the plan items:\n\n${itemsText}`;
 
   try {
-    const responseText = await callBedrock(PLAN_SYSTEM_PROMPT, userPrompt);
+    const responseText = await callOpenAi({
+      schemaName: 'plan_quality_analysis',
+      schemaDescription: 'Structured evaluation of plan quality, falsifiability, and workload.',
+      schema: PLAN_RESPONSE_SCHEMA,
+      systemPrompt: PLAN_SYSTEM_PROMPT,
+      userPrompt,
+    });
     if (!responseText) {
       return { error: 'ai_unavailable' };
     }
 
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)```/) || responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    const jsonStr = extractJsonPayload(responseText);
+    if (!jsonStr) {
       return { error: 'ai_parse_error' };
     }
 
-    const jsonStr = jsonMatch[1] || jsonMatch[0];
     const result = JSON.parse(jsonStr) as PlanAnalysisResult;
 
     // Validate and clamp scores
@@ -348,17 +422,22 @@ export async function analyzeRetro(
     : `Evaluate this weekly retro for quality. No plan was found for comparison, so evaluate the retro items on their own specificity, evidence, and substance.\n\nRETRO CONTENT:\n${retroText}`;
 
   try {
-    const responseText = await callBedrock(RETRO_SYSTEM_PROMPT, userPrompt);
+    const responseText = await callOpenAi({
+      schemaName: 'retro_quality_analysis',
+      schemaDescription: 'Structured evaluation of retro coverage, evidence, and suggestions.',
+      schema: RETRO_RESPONSE_SCHEMA,
+      systemPrompt: RETRO_SYSTEM_PROMPT,
+      userPrompt,
+    });
     if (!responseText) {
       return { error: 'ai_unavailable' };
     }
 
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)```/) || responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    const jsonStr = extractJsonPayload(responseText);
+    if (!jsonStr) {
       return { error: 'ai_parse_error' };
     }
 
-    const jsonStr = jsonMatch[1] || jsonMatch[0];
     const result = JSON.parse(jsonStr) as RetroAnalysisResult;
     result.overall_score = Math.max(0, Math.min(1, result.overall_score || 0));
     result.content_hash = contentHash;
@@ -370,9 +449,16 @@ export async function analyzeRetro(
   }
 }
 
-/** Check if Bedrock client is available (for UI to decide whether to render quality assistant) */
-export function isAiAvailable(): boolean {
-  return getClient() !== null;
+/** Check if OpenAI is configured (for UI to decide whether to render quality assistant) */
+export async function isAiAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (availabilityCache && now - availabilityCache.checkedAt < AVAILABILITY_CACHE_MS) {
+    return availabilityCache.value;
+  }
+
+  const available = Boolean(process.env.OPENAI_API_KEY?.trim());
+  availabilityCache = { value: available, checkedAt: now };
+  return available;
 }
 
 export { checkRateLimit };

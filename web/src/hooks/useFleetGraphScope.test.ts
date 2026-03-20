@@ -47,7 +47,7 @@ beforeEach(() => {
   mockUseWorkspace.mockReturnValue({
     currentWorkspace: {
       id: 'ws-1',
-      name: 'Acme Workspace',
+      name: 'Acme Corp',
     },
   });
   mockUseIssues.mockReturnValue({ issues: [] });
@@ -116,7 +116,7 @@ describe('useFleetGraphScope', () => {
     expect(result.current).toEqual({
       scopeType: 'workspace',
       scopeId: 'ws-1',
-      scopeLabel: 'Acme Workspace',
+      scopeLabel: 'Workspace: Acme Corp',
     });
   });
 
@@ -131,7 +131,24 @@ describe('useFleetGraphScope', () => {
     expect(result.current).toEqual({
       scopeType: 'issue',
       scopeId: 'issue-42',
-      scopeLabel: 'Fix trace propagation',
+      scopeLabel: 'Issue: Fix trace propagation',
+    });
+  });
+
+  it('labels sprint scope with a typed prefix from a legacy sprint route', () => {
+    mockUseLocation.mockReturnValue({ pathname: '/sprints/sprint-12' });
+    mockUseActiveWeeksQuery.mockReturnValue({
+      data: {
+        weeks: [{ id: 'sprint-12', name: 'Week 12' }],
+      },
+    });
+
+    const { result } = renderHook(() => useFleetGraphScope());
+
+    expect(result.current).toEqual({
+      scopeType: 'sprint',
+      scopeId: 'sprint-12',
+      scopeLabel: 'Sprint: Week 12',
     });
   });
 });

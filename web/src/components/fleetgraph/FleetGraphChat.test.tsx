@@ -29,9 +29,24 @@ let mockThreadData: {
   messages: Array<{
     role: 'user' | 'assistant';
     content: string;
+    alertId?: string;
+    assessment?: {
+      summary: string;
+      recommendation: string;
+      branch: 'inform_only' | 'confirm_action';
+      proposedAction?: {
+        actionType: string;
+        targetEntityType: 'issue' | 'project' | 'sprint' | 'workspace';
+        targetEntityId: string;
+        description: string;
+        payload: Record<string, unknown>;
+      };
+      citations: string[];
+    };
     timestamp: string;
   }>;
 } | null = null;
+const mockUseDocumentContextQuery = vi.fn();
 
 vi.mock('@/hooks/useFleetGraph', () => ({
   useFleetGraphChat: () => ({
@@ -55,6 +70,10 @@ vi.mock('@/hooks/useFleetGraph', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useDocumentContextQuery', () => ({
+  useDocumentContextQuery: (id: string | undefined) => mockUseDocumentContextQuery(id),
+}));
+
 describe('FleetGraphChat', () => {
   beforeEach(() => {
     mockMutateAsync.mockReset();
@@ -62,12 +81,81 @@ describe('FleetGraphChat', () => {
     mockResolveMutateAsync.mockReset();
     mockAlertsData = { alerts: [] };
     mockThreadData = null;
+    mockUseDocumentContextQuery.mockImplementation((id: string | undefined) => ({
+      data: id ? {
+        current: {
+          id,
+          title: 'Set up project structure',
+          document_type: 'issue',
+          ticket_number: 1,
+        },
+      } : undefined,
+    }));
   });
 
   it('shows quick prompts before conversation starts', () => {
     render(<FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />);
 
     expect(screen.getByRole('button', { name: 'Is this issue stale?' })).toBeInTheDocument();
+  });
+
+  it('hydrates newly persisted actionable thread messages into the open chat', async () => {
+    const { rerender } = render(
+      <FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />,
+    );
+
+    expect(screen.queryByText(/Approve escalate priority/i)).not.toBeInTheDocument();
+
+    mockAlertsData = {
+      alerts: [
+        {
+          id: 'alert-demo-1',
+          summary: 'Demo: Issue One should be escalated before it slips further.',
+          signalType: 'chat_suggestion',
+          status: 'active',
+        },
+      ],
+    };
+    mockThreadData = {
+      thread: {
+        id: 'thread-demo',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        status: 'active',
+        lastPageRoute: null,
+        lastPageSurface: null,
+        lastPageDocumentId: null,
+        lastPageTitle: null,
+        createdAt: '2026-03-19T00:00:00.000Z',
+        updatedAt: '2026-03-19T00:00:00.000Z',
+      },
+      messages: [
+        {
+          role: 'assistant',
+          content: 'Demo: Issue One should be escalated before it slips further.',
+          alertId: 'alert-demo-1',
+          assessment: {
+            summary: 'Demo: Issue One should be escalated before it slips further.',
+            recommendation: 'Approve to raise priority and surface it in the queue.',
+            branch: 'confirm_action',
+            proposedAction: {
+              actionType: 'escalate_priority',
+              targetEntityType: 'issue',
+              targetEntityId: 'issue-1',
+              description: 'Raise issue priority to high for the demo flow.',
+              payload: { priority: 'high' },
+            },
+            citations: ['demo:seed-flow'],
+          },
+          timestamp: '2026-03-19T00:00:01.000Z',
+        },
+      ],
+    };
+
+    rerender(<FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />);
+
+    expect(await screen.findByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByText(/Raise issue priority to high for the demo flow/i)).toBeInTheDocument();
   });
 
   it('supports workspace scope prompts without rendering scope chrome', () => {
@@ -83,6 +171,215 @@ describe('FleetGraphChat', () => {
     expect(screen.queryByText('Scope')).not.toBeInTheDocument();
     expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Overall execution health' })).toBeInTheDocument();
+  });
+
+  it('shows the exact target ticket link for suggested issue changes', async () => {
+    mockMutateAsync.mockResolvedValue({
+      conversationId: 'conv-1',
+      threadId: 'thread-1',
+      runId: 'run-1',
+      branch: 'confirm_action',
+      assessment: {
+        summary: 'Add setup details to the issue description.',
+        recommendation: 'Apply the change to the issue body.',
+        branch: 'confirm_action',
+        proposedAction: {
+          actionType: 'change_state',
+          targetEntityType: 'issue',
+          targetEntityId: 'issue-1',
+          description: 'Move the issue into review after adding the setup details.',
+          payload: {
+            state: 'in_review',
+          },
+        },
+        citations: ['issue-context'],
+      },
+      alerts: [
+        {
+          id: 'alert-1',
+          workspaceId: 'ws-1',
+          fingerprint: 'fp-1',
+          signalType: 'chat_suggestion',
+          entityType: 'issue',
+          entityId: 'issue-1',
+          severity: 'medium',
+          summary: 'Add setup details to the issue description.',
+          recommendation: 'Apply the change to the issue body.',
+          citations: [],
+          ownerUserId: 'user-1',
+          status: 'active',
+          snoozedUntil: null,
+          lastSurfacedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      message: {
+        role: 'assistant',
+        content: 'Add setup details to the issue description.',
+        alertId: 'alert-1',
+        assessment: {
+          summary: 'Add setup details to the issue description.',
+          recommendation: 'Apply the change to the issue body.',
+          branch: 'confirm_action',
+          proposedAction: {
+            actionType: 'change_state',
+            targetEntityType: 'issue',
+            targetEntityId: 'issue-1',
+            description: 'Move the issue into review after adding the setup details.',
+            payload: {
+              state: 'in_review',
+            },
+          },
+          citations: ['issue-context'],
+        },
+        debug: {
+          traceUrl: null,
+          branch: 'confirm_action',
+          entityType: 'issue',
+          entityId: 'issue-1',
+          candidateSignals: ['chat_suggestion'],
+          accountability: {
+            total: 0,
+            overdue: 0,
+            dueToday: 0,
+          },
+          managerActionItems: 0,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    render(<FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'fix it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+
+    const targetLink = await screen.findByRole('link', { name: '#1 Set up project structure' });
+    expect(targetLink).toHaveAttribute('href', '/documents/issue-1');
+  });
+
+  it('uses only the active document editor text for page context', async () => {
+    mockMutateAsync.mockResolvedValue({
+      conversationId: 'conv-1',
+      threadId: 'thread-1',
+      runId: 'run-1',
+      branch: 'inform_only',
+      assessment: {
+        summary: 'Read the active issue content.',
+        recommendation: 'Continue.',
+        branch: 'inform_only',
+        proposedAction: null,
+        citations: [],
+      },
+      alerts: [],
+      message: {
+        role: 'assistant',
+        content: 'Read the active issue content.',
+        assessment: {
+          summary: 'Read the active issue content.',
+          recommendation: 'Continue.',
+          branch: 'inform_only',
+          citations: [],
+        },
+        debug: {
+          traceUrl: null,
+          branch: 'inform_only',
+          entityType: 'issue',
+          entityId: 'issue-1',
+          candidateSignals: [],
+          accountability: {
+            total: 0,
+            overdue: 0,
+            dueToday: 0,
+          },
+          managerActionItems: 0,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    const activeEditor = document.createElement('div');
+    activeEditor.innerHTML = '<div data-fleetgraph-editor="document" data-document-id="issue-1"><div class="ProseMirror">Active issue body</div></div>';
+    const unrelatedEditor = document.createElement('div');
+    unrelatedEditor.innerHTML = '<div data-fleetgraph-editor="document" data-document-id="other-doc"><div class="ProseMirror">Wrong unrelated editor body that should not be read</div></div>';
+    document.body.append(activeEditor, unrelatedEditor);
+
+    render(
+      <FleetGraphChat
+        entityType="issue"
+        entityId="issue-1"
+        workspaceId="ws-1"
+        pageContext={{
+          route: '/documents/issue-1',
+          surface: 'issue',
+          documentId: 'issue-1',
+          title: 'Issue: Set up project structure',
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'what is on this page?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze' }));
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalled();
+    });
+    expect(mockMutateAsync.mock.calls[0]?.[0]?.pageContext?.visibleContentText).toBe('Active issue body');
+
+    activeEditor.remove();
+    unrelatedEditor.remove();
+  });
+
+  it('shows the completed target ticket after approval succeeds', async () => {
+    mockResolveMutateAsync.mockResolvedValue({ success: true });
+    mockThreadData = {
+      thread: {
+        id: 'thread-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        status: 'active',
+        lastPageRoute: '/documents/issue-1',
+        lastPageSurface: 'issue',
+        lastPageDocumentId: 'issue-1',
+        lastPageTitle: 'Set up project structure',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      messages: [
+        {
+          role: 'assistant',
+          content: 'Move the issue into review after adding the setup details.',
+          alertId: 'alert-1',
+          assessment: {
+            summary: 'Move the issue into review after adding the setup details.',
+            recommendation: 'Approve the action.',
+            branch: 'confirm_action',
+            proposedAction: {
+              actionType: 'change_state',
+              targetEntityType: 'issue',
+              targetEntityId: 'issue-1',
+              description: 'Move the issue into review after adding the setup details.',
+              payload: {
+                state: 'in_review',
+              },
+            },
+            citations: ['issue-context'],
+          },
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+
+    render(<FleetGraphChat entityType="issue" entityId="issue-1" workspaceId="ws-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('State updated')).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole('link', { name: '#1 Set up project structure' })).toSatisfy((links) =>
+      links.every((link) => link.getAttribute('href') === '/documents/issue-1'));
   });
 
   it('renders the assistant summary once when message content already matches assessment summary', async () => {
@@ -394,7 +691,7 @@ describe('FleetGraphChat', () => {
     expect(screen.queryByText('Dismiss')).not.toBeInTheDocument();
   });
 
-  it('keeps hydrated thread messages when scope resolves after refresh', () => {
+  it('keeps hydrated workspace thread messages across route and scope changes when persistAcrossScopes is enabled', () => {
     const now = new Date().toISOString();
     mockThreadData = {
       thread: {
@@ -424,6 +721,7 @@ describe('FleetGraphChat', () => {
         entityId="ws-1"
         workspaceId="ws-1"
         scopeType="workspace"
+        persistAcrossScopes
       />,
     );
 
@@ -435,6 +733,7 @@ describe('FleetGraphChat', () => {
         entityId="issue-1"
         workspaceId="ws-1"
         scopeType="issue"
+        persistAcrossScopes
       />,
     );
 
@@ -500,7 +799,7 @@ describe('FleetGraphChat', () => {
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
   });
 
-  it('hides the conversation count row and reacts to header new-thread requests', async () => {
+  it('hides the conversation count row and resets a hydrated workspace thread when the header requests a new thread', async () => {
     const now = new Date().toISOString();
     mockThreadData = {
       thread: {
@@ -531,26 +830,35 @@ describe('FleetGraphChat', () => {
 
     const { rerender } = render(
       <FleetGraphChat
-        entityType="issue"
-        entityId="issue-1"
+        entityType="workspace"
+        entityId="ws-1"
         workspaceId="ws-1"
+        scopeType="workspace"
+        persistAcrossScopes
         newThreadNonce={0}
       />,
     );
 
     expect(screen.queryByText(/conversation \(/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Persisted thread survives refresh')).toBeInTheDocument();
 
     rerender(
       <FleetGraphChat
-        entityType="issue"
-        entityId="issue-1"
+        entityType="workspace"
+        entityId="ws-1"
         workspaceId="ws-1"
+        scopeType="workspace"
+        persistAcrossScopes
         newThreadNonce={1}
       />,
     );
 
     await waitFor(() => {
       expect(mockCreateThreadMutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Persisted thread survives refresh')).not.toBeInTheDocument();
     });
   });
 });

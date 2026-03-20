@@ -313,6 +313,18 @@ export interface FleetGraphOnDemandResponse {
   traceUrl?: string;
 }
 
+/** POST /api/fleetgraph/demo/seed-flow */
+export interface FleetGraphDemoSeedRequest {
+  entityType: FleetGraphEntityType;
+  entityId: string;
+}
+
+export interface FleetGraphDemoSeedResponse {
+  seededIssueCount: number;
+  seededApprovalCount: number;
+  seededIssueIds: string[];
+}
+
 /** POST /api/fleetgraph/page-view */
 export interface FleetGraphPageViewResponse {
   triggered: boolean;
@@ -396,7 +408,9 @@ export interface FleetGraphChatThread {
   lastPageSurface: string | null;
   lastPageDocumentId: string | null;
   lastPageTitle: string | null;
-  /** Entity scope: threads can be scoped to a specific entity. */
+  /** Latest full page context for follow-up turns when the client omits pageContext. */
+  lastPageContext: FleetGraphPageContext | null;
+  /** Threads are workspace-global; entity scope is a per-turn hint, not the thread key. */
   entityType: FleetGraphEntityType | null;
   entityId: string | null;
   createdAt: string;
@@ -463,6 +477,37 @@ export interface FleetGraphChatResponse {
   alerts: FleetGraphAlert[];
   message: FleetGraphChatMessage;
   traceUrl?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Modal feed (proactive modal surface)
+// ---------------------------------------------------------------------------
+
+export interface FleetGraphModalFeedItem {
+  alertId: string;
+  entityType: FleetGraphEntityType;
+  entityId: string;
+  title: string;
+  signalType: FleetGraphSignalType;
+  severity: AlertSeverity;
+  whatChanged: string;
+  whyThisMatters: string;
+  ownerLabel: string | null;
+  nextDecision: string | null;
+  explanation: string | null;
+  reasoning: string | null;
+  displayPriority: number;
+  isActionable: boolean;
+  /** Present only when there is a pending approval for this alert. */
+  approval: FleetGraphApproval | null;
+  createdAt: string;
+  lastSurfacedAt: string;
+}
+
+/** GET /api/fleetgraph/modal-feed */
+export interface FleetGraphModalFeedResponse {
+  items: FleetGraphModalFeedItem[];
+  total: number;
 }
 
 // ---------------------------------------------------------------------------

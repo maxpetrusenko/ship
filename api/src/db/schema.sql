@@ -401,6 +401,50 @@ CREATE TABLE IF NOT EXISTS fleetgraph_approvals (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- FleetGraph chat threads table: persistent chat conversations with page context
+CREATE TABLE IF NOT EXISTS fleetgraph_chat_threads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+  last_page_route TEXT,
+  last_page_surface TEXT,
+  last_page_document_id TEXT,
+  last_page_title TEXT,
+  entity_type TEXT,
+  entity_id TEXT,
+  last_page_context JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- FleetGraph chat messages table: individual messages within threads
+CREATE TABLE IF NOT EXISTS fleetgraph_chat_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id UUID NOT NULL REFERENCES fleetgraph_chat_threads(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  assessment JSONB,
+  debug JSONB,
+  alert_id UUID REFERENCES fleetgraph_alerts(id) ON DELETE SET NULL,
+  trace_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- FleetGraph alert recipients table: per-user alert delivery and read status
+CREATE TABLE IF NOT EXISTS fleetgraph_alert_recipients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id UUID NOT NULL REFERENCES fleetgraph_alerts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id),
+  read_at TIMESTAMPTZ,
+  dismissed_at TIMESTAMPTZ,
+  snoozed_until TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (alert_id, user_id)
+);
+
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
@@ -526,6 +570,18 @@ CREATE INDEX IF NOT EXISTS idx_fleetgraph_approvals_workspace
   ON fleetgraph_approvals(workspace_id, status);
 CREATE INDEX IF NOT EXISTS idx_fleetgraph_approvals_expires
   ON fleetgraph_approvals(expires_at) WHERE status = 'pending';
+
+-- FleetGraph chat threads indexes
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_chat_threads_active
+  ON fleetgraph_chat_threads(workspace_id, user_id, entity_type, entity_id, status) WHERE status = 'active';
+
+-- FleetGraph chat messages indexes
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_chat_messages_thread
+  ON fleetgraph_chat_messages(thread_id, created_at);
+
+-- FleetGraph alert recipients indexes
+CREATE INDEX IF NOT EXISTS idx_fleetgraph_alert_recipients_unread
+  ON fleetgraph_alert_recipients(user_id, read_at) WHERE dismissed_at IS NULL AND snoozed_until IS NULL;
 
 -- Drop the legacy separate tables if they exist (greenfield cleanup)
 DROP TABLE IF EXISTS sprints CASCADE;

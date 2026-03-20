@@ -1,8 +1,16 @@
 # FleetGraph
 
-FleetGraph is Ship's execution-drift agent. It watches project execution, detects meaningful drift, explains why it matters with cited evidence, proposes the next best action, and stops at a human gate before any consequential write.
+FleetGraph is Ship's execution-drift agent. It gives Ship a stronger operating loop: not just showing work, but noticing when execution starts to drift away from plan, calling out the regression early, and helping the team get back on course before the sprint quietly slides off the rails.
+
+The north star is simple. Ship should not wait for a manager to hunt through boards, issue history, and stale approvals to discover that momentum is fading. FleetGraph watches for those signals continuously, explains what changed, shows why it matters now, and keeps a human in control before anything consequential is written back into the system.
 
 Runtime: LangGraph JS (TypeScript). Reasoning: OpenAI gpt-4o-mini. Proactive sweep: every 4 minutes. Tracing: LangSmith.
+
+## CTO Narrative
+
+The product story is not "we added AI chat to Ship." The product story is that Ship now has a built-in execution layer that can protect the team's north star. When work starts to stall, approvals sit too long, standups go missing, or sprint scope bends away from the original plan, FleetGraph turns those weak signals into a clear operational read: what regressed, who owns the next move, and whether the system should inform or pause for approval.
+
+That is why the architecture matters. FleetGraph uses one shared graph for proactive and on-demand runs, starts with deterministic checks before it spends tokens, branches cleanly between healthy and risky states, and stops at a human gate before any consequential action. The result is an agent that feels less like a chatbot and more like an always-on project control layer inside Ship.
 
 ## Agent Responsibility
 

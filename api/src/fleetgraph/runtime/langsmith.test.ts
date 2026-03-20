@@ -30,6 +30,28 @@ describe('fleetgraph LangSmith env helpers', () => {
     expect(canUseLangSmithTracing(env)).toBe(true);
   });
 
+  it('ignores an empty modern LangSmith key and falls back to the legacy key', () => {
+    const env = {
+      LANGSMITH_TRACING: 'true',
+      LANGSMITH_API_KEY: '',
+      LANGCHAIN_API_KEY: 'legacy-key',
+    };
+
+    expect(getLangSmithApiKey(env)).toBe('legacy-key');
+    expect(canUseLangSmithTracing(env)).toBe(true);
+  });
+
+  it('keeps tracing disabled when all LangSmith key env vars are empty', () => {
+    const env = {
+      LANGSMITH_TRACING: 'true',
+      LANGSMITH_API_KEY: '',
+      LANGCHAIN_API_KEY: '',
+    };
+
+    expect(getLangSmithApiKey(env)).toBeNull();
+    expect(canUseLangSmithTracing(env)).toBe(false);
+  });
+
   it('prefers modern project env name with legacy fallback', () => {
     expect(getLangSmithProjectName({
       LANGSMITH_PROJECT: 'fleetgraph',
@@ -61,6 +83,24 @@ describe('fleetgraph LangSmith env helpers', () => {
         shareRun: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
       },
       { LANGSMITH_TRACING: 'true', LANGSMITH_API_KEY: 'lsv2-key' },
+    );
+
+    expect(url).toBe('https://smith.langchain.com/public/run-123/r');
+  });
+
+  it('shares the run when LangSmith returns 404 while reading the shared link', async () => {
+    const url = await resolveLangSmithRunUrl(
+      'run-123',
+      {
+        readRunSharedLink: async () => {
+          const err = new Error('Run not found') as Error & { status?: number };
+          err.status = 404;
+          throw err;
+        },
+        shareRun: async (runId: string) => `https://smith.langchain.com/public/${runId}/r`,
+      },
+      { LANGSMITH_TRACING: 'true', LANGSMITH_API_KEY: 'lsv2-key' },
+      { maxAttempts: 1, retryDelayMs: 0 },
     );
 
     expect(url).toBe('https://smith.langchain.com/public/run-123/r');
