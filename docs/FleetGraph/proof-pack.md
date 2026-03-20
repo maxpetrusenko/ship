@@ -42,27 +42,36 @@ Not run in this pass:
 
 - E2E tests. Repo instruction currently says not to run them.
 
-## Live proof still pending
+## Live proof (captured 2026-03-20)
 
-The following submission artifacts still need a live environment run:
+### Deployment verified
+- `GET /health` -> `200 {"status":"ok"}`
+- `GET /api/fleetgraph/status` -> `200 {"running":true,"lastSweepAt":"2026-03-20T18:33:16.036Z","sweepIntervalMs":240000,"alertsActive":6}`
 
-- Shared LangSmith trace links
-- Notification center screenshot
-- Confirm-action pause/resume screenshot or recording
-- Workspace chat screenshot
+### LangSmith traces (7 shared links)
+All trace links are live in [`FLEETGRAPH.md`](../../FLEETGRAPH.md) Test Cases table. Branch diversity:
+- `clean`: on-demand healthy issue (0 tokens, 349ms)
+- `inform_only`: proactive scope_drift sweep (3 successful runs, ~1900 tokens each, 9-12s)
+- `confirm_action`: on-demand scope_drift with proposed action (1911 tokens, 6.7s, traceUrl returned)
+- `error`: pre-fix constraint violation trace (shows error fallback path)
+- `workspace chat`: workspace-scope chat with 4 due-today items (9s, tool calls visible)
 
-Current blockers in shell env:
+### Latency measurements
+| Scenario | Latency | Method |
+|----------|---------|--------|
+| Clean on-demand (no LLM) | 349ms | `POST /on-demand` timed |
+| Inform-only proactive | 9.9-12.3s | LangSmith trace `end_time - start_time` |
+| Confirm-action on-demand | 6,707ms | `POST /on-demand` timed |
+| Workspace chat | 8,996ms | `POST /chat` timed |
+| Full sweep (3 issues) | 33,608ms | Server log `Sweep complete in` |
+| Sweep interval | 240,000ms | 4 minutes, well under 5-min detection SLA |
 
-- `LANGCHAIN_API_KEY` missing
-- `OPENAI_API_KEY` missing
-- `FLEETGRAPH_API_TOKEN` missing
-- `FLEETGRAPH_WORKSPACE_ID` missing
-- `DATABASE_URL` missing
+### Token costs (observed)
+- Average per LLM run: ~1,880 tokens (1,740 input + 150 output)
+- Cost per run: ~$0.00027 (gpt-4o-mini)
+- Clean runs: 0 tokens (heuristic exit before LLM)
+- Total 28 pre-fix runs: $0.007625
 
-## Capture checklist once env is present
-
-1. Export `LANGCHAIN_API_KEY`, `OPENAI_API_KEY`, `FLEETGRAPH_API_TOKEN`, `FLEETGRAPH_WORKSPACE_ID`, and `DATABASE_URL`.
-2. Start Ship and generate traces from the scenarios in [`trace-links.md`](./trace-links.md).
-3. Replace `[PENDING]` links in [`FLEETGRAPH.md`](../../FLEETGRAPH.md) and [`trace-links.md`](./trace-links.md).
-4. Capture screenshots for notification center, confirm-action approval card, and workspace chat.
-5. Attach those artifacts to the submission pack.
+### Bug fix deployed
+- `idx_fleetgraph_approvals_pending` constraint violation fixed (approval upsert)
+- Pre-fix: 26/28 runs errored. Post-fix: 3/3 runs succeeded.

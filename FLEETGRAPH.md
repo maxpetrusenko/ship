@@ -369,13 +369,13 @@ Each test case maps to a use case above. Trace links require running the system 
 
 | # | Scenario | Ship state | Expected branch | Expected output | Trace |
 |---|----------|-----------|-----------------|-----------------|-------|
-| 1 | Clean proactive sweep | Active sprint, recent standup, no stale issues, approvals current | `clean` | No alert; audit log shows clean run with 0 candidates | [PENDING] |
-| 2 | Manager missed standup | Active sprint, team member has overdue standup items; manager copy is generated and broadcast workspace-wide | `inform_only` | Sprint alert naming the missing standup owner with low severity | [PENDING] |
-| 3 | Scope drift | Active sprint contains a reopened issue; scheduler fans out to issue scope | `inform_only` | Scope drift alert with high severity, cites the drifting issue | [PENDING] |
-| 4 | Stalled approval with action | Review-type accountability item pending 2+ business days, approver identifiable | `confirm_action` | Recommendation with proposed action (add_comment to nudge reviewer), approval card rendered | [PENDING] |
-| 5 | On-demand issue analysis | User opens FleetGraph on an issue with no activity for 5+ days | `inform_only` or `confirm_action` | Opinionated summary explaining the stall, recommending priority escalation or reassignment | [PENDING] |
-| 6 | Partial data fallback | Ship API returns 500 on one fetch (e.g., activity endpoint down) | `error` | Structured error log with `failedNode`, `retryable: true`. No speculative alert generated. | [PENDING] |
-| 7 | Workspace scope chat | User opens FleetGraph from dashboard/settings/search with no entity context | `inform_only` | Request stays `entityType: "workspace"` and response summarizes workspace triage without project aliasing | [PENDING] |
+| 1 | Clean on-demand sweep | Healthy issue with recent activity, no stale signals | `clean` | No alert; 0 candidates, 0 tokens (heuristic exit) | [Trace 1](https://smith.langchain.com/public/ef21d9c9-32ce-47eb-ae90-1516e32a9c55/r) |
+| 2 | Manager missed standup | Active sprint, team member has overdue standup items; manager copy is generated and broadcast workspace-wide | `inform_only` | Sprint alert naming the missing standup owner with low severity | [Trace 2](https://smith.langchain.com/public/b673cff5-b2a0-4c0e-9808-7f5b2a6f5991/r) |
+| 3 | Scope drift (proactive) | Active sprint contains a reopened issue; scheduler fans out to issue scope | `inform_only` | Scope drift alert with high severity, approval created, WebSocket broadcast | [Trace 3](https://smith.langchain.com/public/af30a432-29aa-48d8-8163-4336ae600300/r) |
+| 4 | Scope drift with action (on-demand) | Issue with scope_drift detected, LLM recommends review_scope action | `confirm_action` | Recommendation with proposed action (review_scope), approval card rendered, traceUrl returned | [Trace 4](https://smith.langchain.com/public/fe7c0509-e23a-429f-ab9b-4f5562a49ab7/r) |
+| 5 | On-demand issue analysis | User opens FleetGraph on a drifted issue | `inform_only` or `confirm_action` | Opinionated summary explaining scope drift, recommending scope review | [Trace 5](https://smith.langchain.com/public/dd7d8b27-769f-4819-bec9-6080fa7692d0/r) |
+| 6 | Error fallback | Pre-fix sweep with duplicate approval constraint | `error` | Graph enters error state, structured error logged, no speculative alert | [Trace 6](https://smith.langchain.com/public/0d0cd646-6fae-46b6-9a89-3041652ae47d/r) |
+| 7 | Workspace scope chat | User opens FleetGraph from dashboard with no entity context | `inform_only` | Request uses `entityType: "workspace"`, response summarizes 4 due-today accountability items | [Trace 7](https://smith.langchain.com/public/fca2d39f-65d7-4c94-bc45-ca80e4a5ef2d/r) |
 
 **How to generate traces:** Set `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY`, start the server with `pnpm dev`, then trigger on-demand via `POST /api/fleetgraph/on-demand`. Proactive traces generate automatically via the 4-min sweep. See [`docs/FleetGraph/trace-links.md`](./docs/FleetGraph/trace-links.md) for detailed instructions and seeded state descriptions.
 

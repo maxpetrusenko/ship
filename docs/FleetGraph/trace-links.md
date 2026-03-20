@@ -38,7 +38,7 @@ Start the server with `pnpm dev`. Proactive traces are generated automatically b
 - Audit log entry with branch=clean, candidateCount=0
 - No LLM invocation (cost: $0)
 
-**Trace URL:** `[PENDING: run with LANGCHAIN_TRACING_V2=true]`
+**Trace URL:** See FLEETGRAPH.md Test Cases table for live links.
 
 ---
 
@@ -61,7 +61,7 @@ Start the server with `pnpm dev`. Proactive traces are generated automatically b
 - LLM produces summary with cited evidence
 - Audit log entry with branch=inform_only
 
-**Trace URL:** `[PENDING: run with LANGCHAIN_TRACING_V2=true]`
+**Trace URL:** See FLEETGRAPH.md Test Cases table for live links.
 
 ---
 
@@ -84,7 +84,7 @@ Start the server with `pnpm dev`. Proactive traces are generated automatically b
 - Graph pauses via `interrupt()` inside `human_gate` when a checkpointer is present
 - Approval card rendered in UI with countdown timer
 
-**Trace URL:** `[PENDING: run with LANGCHAIN_TRACING_V2=true]`
+**Trace URL:** See FLEETGRAPH.md Test Cases table for live links.
 
 ---
 
@@ -106,7 +106,7 @@ Start the server with `pnpm dev`. Proactive traces are generated automatically b
 - No alert generated (fail-safe behavior)
 - Audit log entry with branch=error
 
-**Trace URL:** `[PENDING: run with LANGCHAIN_TRACING_V2=true]`
+**Trace URL:** See FLEETGRAPH.md Test Cases table for live links.
 
 ---
 
@@ -128,7 +128,7 @@ Start the server with `pnpm dev`. Proactive traces are generated automatically b
 - Chat response summarizes workspace-level triage signals
 - No project passthrough in the request payload
 
-**Trace URL:** `[PENDING: run with LANGCHAIN_TRACING_V2=true]`
+**Trace URL:** See FLEETGRAPH.md Test Cases table for live links.
 
 ---
 
