@@ -117,18 +117,12 @@ describe('seedFleetGraphDemoFlow integration', () => {
   });
 
   it('uses scoped real issues only and persists actionable chat items into Postgres', async () => {
-    const invokeRuns: string[] = [];
-
     const response = await seedFleetGraphDemoFlow({
       pool,
       workspaceId,
       userId,
       entityType: 'project',
       entityId: projectId,
-      invokeGraph: async (initialState) => {
-        invokeRuns.push(initialState.entityId ?? 'missing');
-        return { state: initialState, interrupted: false };
-      },
       upsertAlert,
       createRecipients,
       createApproval,
@@ -139,7 +133,6 @@ describe('seedFleetGraphDemoFlow integration', () => {
     expect(response.seededIssueIds).toHaveLength(2);
     expect(response.seededIssueIds).toEqual(expect.arrayContaining([relatedIssueAId, relatedIssueBId]));
     expect(response.seededIssueIds).not.toContain(unrelatedIssueId);
-    expect(invokeRuns).toEqual(expect.arrayContaining([relatedIssueAId, relatedIssueBId]));
 
     const thread = await getOrCreateActiveThread(pool, workspaceId, userId);
     const messages = await loadRecentMessages(pool, thread.id);
@@ -162,9 +155,10 @@ describe('seedFleetGraphDemoFlow integration', () => {
     expect(approvals).toHaveLength(2);
     expect(approvals.every((approval) => approval.threadId === `chat:${thread.id}`)).toBe(true);
 
-    expect(feed.total).toBe(2);
-    expect(feed.items.every((item) => item.isActionable)).toBe(true);
-    expect(feed.items.map((item) => item.entityId)).toEqual(
+    expect(feed.total).toBe(4); // 2 stale_issue + 2 chat_suggestion
+    const actionableItems = feed.items.filter((item) => item.isActionable);
+    expect(actionableItems).toHaveLength(2);
+    expect(actionableItems.map((item) => item.entityId)).toEqual(
       expect.arrayContaining([relatedIssueAId, relatedIssueBId]),
     );
 

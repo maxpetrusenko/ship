@@ -175,7 +175,6 @@ router.post('/demo/seed-flow', async (req: Request, res: Response) => {
       userId,
       entityType: body.entityType,
       entityId: body.entityId,
-      invokeGraph,
       upsertAlert,
       createRecipients,
       createApproval,

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type pg from 'pg';
 import {
   DEFAULT_THRESHOLDS,
@@ -7,7 +6,6 @@ import {
   type FleetGraphChatDebugInfo,
   type FleetGraphDemoSeedResponse,
   type FleetGraphEntityType,
-  type FleetGraphRunState,
 } from '@ship/shared';
 
 type DemoIssueRow = {
@@ -16,7 +14,6 @@ type DemoIssueRow = {
   state: string;
 };
 
-type GraphInvoker = (initialState: FleetGraphRunState) => Promise<unknown>;
 type DemoAlertInput = Partial<FleetGraphAlert> & {
   workspaceId: string;
   fingerprint: string;
@@ -47,38 +44,6 @@ type ChatAppender = (
 const MAX_DEMO_ISSUES = 3;
 const MAX_DEMO_APPROVALS = 2;
 const DAY_MS = 86_400_000;
-
-function buildInitialRunState(
-  workspaceId: string,
-  userId: string,
-  entityId: string,
-): FleetGraphRunState {
-  const runId = crypto.randomUUID();
-  return {
-    runId,
-    traceId: runId,
-    mode: 'on_demand',
-    workspaceId,
-    actorUserId: userId,
-    entityType: 'issue',
-    entityId,
-    pageContext: null,
-    coreContext: {},
-    parallelSignals: {},
-    candidates: [],
-    branch: 'clean',
-    assessment: null,
-    gateOutcome: null,
-    snoozeUntil: null,
-    error: null,
-    runStartedAt: Date.now(),
-    tokenUsage: null,
-    chatQuestion: null,
-    chatHistory: null,
-    traceUrl: null,
-    trigger: 'on_demand',
-  };
-}
 
 async function selectScopedIssues(
   pool: pg.Pool,
@@ -200,7 +165,6 @@ export async function seedFleetGraphDemoFlow({
   userId,
   entityType,
   entityId,
-  invokeGraph,
   upsertAlert,
   createRecipients,
   createApproval,
@@ -212,7 +176,6 @@ export async function seedFleetGraphDemoFlow({
   userId: string;
   entityType: FleetGraphEntityType;
   entityId: string;
-  invokeGraph: GraphInvoker;
   upsertAlert: AlertUpserter;
   createRecipients: RecipientCreator;
   createApproval: ApprovalCreator;
@@ -270,7 +233,21 @@ export async function seedFleetGraphDemoFlow({
       );
     }
 
-    await invokeGraph(buildInitialRunState(workspaceId, userId, issue.id));
+    // Create stale_issue alert directly (skip invokeGraph to avoid 18-36s LLM timeout)
+    const staleAlert = await upsertAlert(pool, {
+      workspaceId,
+      fingerprint: `demo:${workspaceId}:${issue.id}:stale:${Date.now()}`,
+      signalType: 'stale_issue',
+      entityType: 'issue',
+      entityId: issue.id,
+      severity: 'medium',
+      summary: `${issue.title} has been in progress for ${staleDays} days with no updates.`,
+      recommendation: 'Review whether this issue is blocked or needs reassignment.',
+      citations: ['demo:seed-flow'],
+      ownerUserId: userId,
+      status: 'active',
+    });
+    await createRecipients(pool, staleAlert.id, [userId]);
   }
 
   const actionableIssues = issues.slice(0, MAX_DEMO_APPROVALS);

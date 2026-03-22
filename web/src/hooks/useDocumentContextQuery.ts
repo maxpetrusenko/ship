@@ -62,5 +62,9 @@ export function useDocumentContextQuery(id: string | undefined) {
     enabled: !!id,
     staleTime: 1000 * 60 * 2, // 2 minutes
     refetchOnMount: 'always',
+    retry: (failureCount, error) => {
+      if ((error as Error & { status?: number }).status === 404) return false;
+      return failureCount < 3;
+    },
   });
 }

@@ -1851,7 +1851,7 @@ describe('GET /api/fleetgraph/status', () => {
 describe('POST /api/fleetgraph/demo/seed-flow', () => {
   const app = createTestApp();
 
-  it('backdates real issues, invokes stale analysis, and seeds actionable approvals', async () => {
+  it('backdates real issues, creates stale alerts, and seeds actionable approvals', async () => {
     mockPoolQuery
       .mockResolvedValueOnce({
         rows: [
@@ -1862,12 +1862,10 @@ describe('POST /api/fleetgraph/demo/seed-flow', () => {
         rowCount: 3,
       })
       .mockResolvedValue({ rows: [], rowCount: 0 });
-    mockInvokeGraph.mockResolvedValue({
-      state: makeChatGraphState(),
-      interrupted: false,
-      threadId: 'run-demo',
-    });
     mockUpsertAlert
+      .mockResolvedValueOnce(makeAlert({ id: 'stale-alert-1', signalType: 'stale_issue', entityId: 'iss-1' }))
+      .mockResolvedValueOnce(makeAlert({ id: 'stale-alert-2', signalType: 'stale_issue', entityId: 'iss-2' }))
+      .mockResolvedValueOnce(makeAlert({ id: 'stale-alert-3', signalType: 'stale_issue', entityId: 'iss-3' }))
       .mockResolvedValueOnce(makeAlert({ id: 'demo-alert-1', signalType: 'chat_suggestion', entityId: 'iss-1' }))
       .mockResolvedValueOnce(makeAlert({ id: 'demo-alert-2', signalType: 'chat_suggestion', entityId: 'iss-2' }));
     mockCreateRecipients.mockResolvedValue(undefined);
@@ -1897,9 +1895,9 @@ describe('POST /api/fleetgraph/demo/seed-flow', () => {
     expect(res.body.seededIssueCount).toBe(3);
     expect(res.body.seededApprovalCount).toBe(2);
     expect(res.body.seededIssueIds).toEqual(['iss-1', 'iss-2', 'iss-3']);
-    expect(mockInvokeGraph).toHaveBeenCalledTimes(3);
-    expect(mockUpsertAlert).toHaveBeenCalledTimes(2);
-    expect(mockCreateRecipients).toHaveBeenCalledTimes(2);
+    expect(mockInvokeGraph).not.toHaveBeenCalled();
+    expect(mockUpsertAlert).toHaveBeenCalledTimes(5); // 3 stale + 2 approval
+    expect(mockCreateRecipients).toHaveBeenCalledTimes(5); // 3 stale + 2 approval
     expect(mockCreateApproval).toHaveBeenCalledTimes(2);
     expect(mockGetOrCreateActiveThread).toHaveBeenCalledWith(
       expect.objectContaining({ query: mockPoolQuery }),
