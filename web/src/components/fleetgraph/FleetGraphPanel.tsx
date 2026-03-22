@@ -210,8 +210,8 @@ export function FleetGraphPanel({ entityType, entityId, workspaceId }: FleetGrap
                 description: approval.description,
                 payload: approval.payload,
               }}
-              onApprove={() => resolve.mutateAsync({ alertId: alert.id, outcome: 'approve' })}
-              onReject={() => resolve.mutateAsync({ alertId: alert.id, outcome: 'reject' })}
+              onApprove={() => resolve.mutateAsync({ alertId: alert.id, outcome: 'approve', targetEntityType: approval.targetEntityType, targetEntityId: approval.targetEntityId })}
+              onReject={() => resolve.mutateAsync({ alertId: alert.id, outcome: 'reject', targetEntityType: approval.targetEntityType, targetEntityId: approval.targetEntityId })}
               onDismiss={() => resolve.mutateAsync({ alertId: alert.id, outcome: 'dismiss' })}
               onSnooze={(minutes) => resolve.mutateAsync({ alertId: alert.id, outcome: 'snooze', snoozeDurationMinutes: minutes })}
               isActioning={resolve.isPending}

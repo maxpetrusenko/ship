@@ -615,8 +615,15 @@ export function FleetGraphChat({
   }, [handleNewThread, newThreadNonce]);
 
   const handleResolveAction = useCallback(async (outcome: 'approve' | 'dismiss', alertId: string) => {
-    await resolve.mutateAsync({ alertId, outcome });
-  }, [resolve]);
+    const msg = messages.find((m) => m.alertId === alertId || resolveMessageAlertId(m, alertsQuery.data?.alerts ?? []) === alertId);
+    const action = msg?.assessment?.proposedAction;
+    await resolve.mutateAsync({
+      alertId,
+      outcome,
+      targetEntityType: action?.targetEntityType as FleetGraphEntityType | undefined,
+      targetEntityId: action?.targetEntityId,
+    });
+  }, [resolve, messages, alertsQuery.data]);
 
   const runAnalysis = useCallback(async (q: string) => {
     if (!q.trim()) return;
