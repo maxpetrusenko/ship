@@ -450,6 +450,8 @@ The scheduler starts automatically on server boot. No separate process or infras
 
 ## Supporting Research
 
+Verification guide: [docs/FleetGraph/VERIFICATION.md](./docs/FleetGraph/VERIFICATION.md) — node-by-node deterministic/LLM breakdown, test case matrix, trace reading guide, architecture invariants
+Demo script: [docs/FleetGraph/DEMO_SCRIPT.md](./docs/FleetGraph/DEMO_SCRIPT.md) — structured 6-part walkthrough showing each graph path with reproduction steps
 Pre-research decision memo: [PRESEARCH.md](./PRESEARCH.md)
 Detailed presearch docs: [docs/FleetGraph/README.md](./docs/FleetGraph/README.md)
 Trace link templates: [docs/FleetGraph/trace-links.md](./docs/FleetGraph/trace-links.md)
