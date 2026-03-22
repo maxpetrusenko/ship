@@ -971,7 +971,16 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     }
 
     if (updates.length === 0 && !belongsToChanged) {
-      res.status(400).json({ error: 'No fields to update' });
+      // Idempotent: return current issue as-is (no changes needed)
+      const fullRow = await client.query(
+        `SELECT * FROM documents WHERE id = $1 AND workspace_id = $2`,
+        [id, workspaceId]
+      );
+      client.release();
+      const issue = extractIssueFromRow(fullRow.rows[0]);
+      const belongsTo = await getBelongsToAssociations(id, { workspaceId, userId, isAdmin });
+      const displayId = `#${fullRow.rows[0].ticket_number}`;
+      res.json({ ...issue, display_id: displayId, belongs_to: belongsTo });
       return;
     }
 

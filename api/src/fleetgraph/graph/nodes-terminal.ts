@@ -18,6 +18,12 @@ import {
   executeShipAction,
   persistAuditEntry,
 } from '../data/fetchers.js';
+import { traceable } from 'langsmith/traceable';
+import {
+  canUseLangSmithTracing,
+  getLangSmithProjectName,
+  resolveLangSmithRunUrl,
+} from '../runtime/langsmith.js';
 import {
   createAlertWithRecipients,
   createApprovalFromAction,
@@ -283,6 +289,43 @@ export async function logCleanRun(
   state: FleetGraphStateType,
 ): Promise<Partial<FleetGraphStateType>> {
   console.log(`[FleetGraph:Node11] log_clean_run: duration=${computeDuration(state)}ms`);
+
+  let traceUrl: string | null = null;
+
+  if (canUseLangSmithTracing(process.env)) {
+    let traceRunId: string | null = null;
+    let traceClient: {
+      readRunSharedLink: (runId: string) => Promise<string | undefined>;
+      shareRun: (runId: string) => Promise<string>;
+    } | null = null;
+
+    const traced = traceable(
+      async (payload: { entityType: string; entityId: string; branch: string }) => payload,
+      {
+        name: 'fleetgraph_clean_run',
+        run_type: 'chain',
+        project_name: getLangSmithProjectName(process.env) ?? undefined,
+        tags: ['fleetgraph', 'clean'],
+        on_start(runTree) {
+          if (runTree) {
+            traceRunId = runTree.id;
+            traceClient = runTree.client;
+          }
+        },
+      },
+    );
+
+    try {
+      await traced({ entityType: state.entityType ?? 'unknown', entityId: state.entityId ?? 'unknown', branch: 'clean' });
+    } catch (err) {
+      console.warn('[FleetGraph:Node11] clean run trace capture failed:', err);
+    }
+
+    if (traceRunId) {
+      traceUrl = await resolveLangSmithRunUrl(traceRunId, traceClient ?? undefined);
+    }
+  }
+
   await persistAuditEntry({
     workspaceId: state.workspaceId,
     runId: state.runId,
@@ -293,7 +336,7 @@ export async function logCleanRun(
     candidateCount: 0,
     durationMs: computeDuration(state),
     tokenUsage: state.tokenUsage ?? null,
-    traceUrl: null,
+    traceUrl,
     createdAt: new Date().toISOString(),
   });
   return {};
