@@ -207,5 +207,51 @@ describe('FleetGraph fetchers', () => {
         { assignee_id: 'user-2' },
       );
     });
+
+    it('dispatches update_content with TipTap JSON', async () => {
+      mockClientPatch.mockResolvedValueOnce({ id: 'doc-1' });
+
+      const result = await executeShipAction('ws-1', 'update_content', 'issue', 'doc-1', {
+        content: '# Password Hashing\n\nUse Argon2 or bcrypt.\n\n- Salt every hash\n- Verify on login',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Document content updated');
+      expect(mockClientPatch).toHaveBeenCalledWith(
+        '/api/documents/doc-1/content',
+        {
+          content: {
+            type: 'doc',
+            content: [
+              { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Password Hashing' }] },
+              { type: 'paragraph', content: [{ type: 'text', text: 'Use Argon2 or bcrypt.' }] },
+              {
+                type: 'bulletList',
+                content: [
+                  { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Salt every hash' }] }] },
+                  { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Verify on login' }] }] },
+                ],
+              },
+            ],
+          },
+        },
+      );
+    });
+
+    it('throws when update_content payload missing content', async () => {
+      await expect(
+        executeShipAction('ws-1', 'update_content', 'issue', 'doc-1', {}),
+      ).rejects.toThrow('update_content requires content string');
+    });
+
+    it('throws when update_content target not found', async () => {
+      mockClientPatch.mockResolvedValueOnce(null);
+
+      await expect(
+        executeShipAction('ws-1', 'update_content', 'issue', 'doc-missing', {
+          content: 'test',
+        }),
+      ).rejects.toThrow('not found (404)');
+    });
   });
 });

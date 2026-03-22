@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetGraph | Execution-Drift Agent for Ship</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --bg-card-hover: #1a1a26;
+    --border: #1e1e2e;
+    --border-active: #3b3b5c;
+    --text: #e0e0e8;
+    --text-muted: #8888a0;
+    --text-dim: #555570;
+    --accent: #ff6b35;
+    --accent-glow: rgba(255, 107, 53, 0.15);
+    --green: #22c55e;
+    --green-dim: rgba(34, 197, 94, 0.12);
+    --yellow: #eab308;
+    --yellow-dim: rgba(234, 179, 8, 0.12);
+    --red: #ef4444;
+    --red-dim: rgba(239, 68, 68, 0.12);
+    --blue: #3b82f6;
+    --blue-dim: rgba(59, 130, 246, 0.12);
+    --purple: #a855f7;
+    --purple-dim: rgba(168, 85, 247, 0.12);
+    --cyan: #06b6d4;
+    --cyan-dim: rgba(6, 182, 212, 0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* ===== REACTBITS: BlurText animation ===== */
+  .blur-in {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateY(20px);
+    animation: blurTextIn 0.8s ease-out forwards;
+  }
+  .blur-in-delay-1 { animation-delay: 0.15s; }
+  .blur-in-delay-2 { animation-delay: 0.3s; }
+  .blur-in-delay-3 { animation-delay: 0.45s; }
+  .blur-in-delay-4 { animation-delay: 0.6s; }
+
+  @keyframes blurTextIn {
+    0% { opacity: 0; filter: blur(12px); transform: translateY(20px); }
+    50% { opacity: 0.6; filter: blur(4px); transform: translateY(4px); }
+    100% { opacity: 1; filter: blur(0px); transform: translateY(0); }
+  }
+
+  /* ===== REACTBITS: ShinyText shimmer ===== */
+  .shiny-text {
+    background-image: linear-gradient(
+      120deg,
+      var(--accent) 0%, var(--accent) 35%,
+      #fff 50%,
+      var(--accent) 65%, var(--accent) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shinyTextSweep 3s linear infinite;
+  }
+  @keyframes shinyTextSweep {
+    0% { background-position: 150% center; }
+    100% { background-position: -50% center; }
+  }
+
+  /* ===== REACTBITS: ScrollReveal / AnimatedContent ===== */
+  .reveal {
+    opacity: 0;
+    transform: translateY(32px);
+    transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                filter 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    filter: blur(4px);
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0px);
+  }
+  /* Staggered children */
+  .stagger-children .reveal { transition-delay: calc(var(--stagger, 0) * 80ms); }
+
+  /* ===== REACTBITS: SpotlightCard ===== */
+  .spotlight-card {
+    position: relative;
+    overflow: hidden;
+    --mouse-x: 50%;
+    --mouse-y: 50%;
+    --spotlight-color: rgba(255, 107, 53, 0.08);
+  }
+  .spotlight-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(
+      600px circle at var(--mouse-x) var(--mouse-y),
+      var(--spotlight-color),
+      transparent 40%
+    );
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .spotlight-card:hover::before { opacity: 1; }
+  .spotlight-card > * { position: relative; z-index: 2; }
+
+  /* ===== REACTBITS: StarBorder (animated conic gradient border) ===== */
+  .star-border {
+    position: relative;
+    border: none !important;
+    background: var(--bg-card);
+    overflow: visible;
+  }
+  .star-border::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--star-angle, 0deg),
+      transparent 0%,
+      var(--accent) 10%,
+      transparent 20%,
+      transparent 50%,
+      var(--cyan) 60%,
+      transparent 70%
+    );
+    z-index: -1;
+    animation: starBorderSpin 4s linear infinite;
+  }
+  .star-border::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background: var(--bg-card);
+    z-index: -1;
+  }
+  @keyframes starBorderSpin {
+    0% { --star-angle: 0deg; }
+    100% { --star-angle: 360deg; }
+  }
+  @property --star-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  /* ===== REACTBITS: GlareHover ===== */
+  .glare-hover {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  .glare-hover:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 0 1px var(--border-active);
+  }
+
+  /* ===== REACTBITS: CountUp (handled in JS) ===== */
+  .count-up {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ===== Particle Canvas ===== */
+  #particles-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ===== Chat typing cursor ===== */
+  .typing-cursor::after {
+    content: '\2588';
+    animation: cursorBlink 0.8s step-end infinite;
+    color: var(--accent);
+    margin-left: 2px;
+  }
+  @keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* ===== Pulse dot ===== */
+  .pulse-dot {
+    animation: pulseDot 2s ease-in-out infinite;
+  }
+  @keyframes pulseDot {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  }
+
+  /* ================================================ */
+  /* LAYOUT (same structure, refined for animations)  */
+  /* ================================================ */
+
+  /* Hero */
+  .hero {
+    position: relative;
+    padding: 100px 40px 80px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .hero > * { position: relative; z-index: 1; }
+  .hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 120px;
+    background: linear-gradient(to top, var(--bg), transparent);
+    z-index: 1;
+    pointer-events: none;
+  }
+  .hero-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .hero h1 {
+    font-size: 64px;
+    font-weight: 800;
+    letter-spacing: -3px;
+    line-height: 1.05;
+    margin-bottom: 20px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .hero .hero-sub {
+    font-size: 19px;
+    color: var(--text-muted);
+    max-width: 640px;
+    margin: 0 auto 40px;
+    line-height: 1.7;
+  }
+  .hero-stats {
+    display: flex;
+    justify-content: center;
+    gap: 56px;
+    margin-top: 48px;
+  }
+  .hero-stat .num {
+    font-size: 42px;
+    font-weight: 700;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .hero-stat .label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-top: 4px;
+  }
+
+  /* Sections */
+  section { padding: 80px 40px; max-width: 1200px; margin: 0 auto; }
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  section > h2 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    margin-bottom: 12px;
+  }
+  section > .subtitle {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin-bottom: 48px;
+    max-width: 700px;
+    line-height: 1.7;
+  }
+
+  /* Problem / Solution */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .problem-card, .solution-card {
+    padding: 32px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+  }
+  .problem-card {
+    background: var(--red-dim);
+    border-color: rgba(239, 68, 68, 0.2);
+  }
+  .solution-card {
+    background: var(--green-dim);
+    border-color: rgba(34, 197, 94, 0.2);
+  }
+  .problem-card h3 { color: var(--red); margin-bottom: 16px; font-size: 18px; }
+  .solution-card h3 { color: var(--green); margin-bottom: 16px; font-size: 18px; }
+  .problem-card ul, .solution-card ul { list-style: none; padding: 0; }
+  .problem-card li, .solution-card li {
+    padding: 8px 0;
+    padding-left: 24px;
+    position: relative;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  .problem-card li::before { content: '\2717'; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+  .solution-card li::before { content: '\2713'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+
+  /* Graph Flow */
+  .graph-flow { position: relative; display: flex; flex-direction: column; gap: 0; }
+  .graph-phase { position: relative; }
+  .phase-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    padding-left: 4px;
+  }
+  .graph-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: default;
+    flex-shrink: 0;
+    min-width: 240px;
+  }
+  .node:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-active);
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  }
+  .node-num {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+  }
+  .node-body { flex: 1; }
+  .node-name { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .node-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .node.entry .node-num { background: var(--blue-dim); color: var(--blue); }
+  .node.data .node-num { background: var(--cyan-dim); color: var(--cyan); }
+  .node.logic .node-num { background: var(--yellow-dim); color: var(--yellow); }
+  .node.llm .node-num { background: var(--purple-dim); color: var(--purple); }
+  .node.action .node-num { background: var(--accent-glow); color: var(--accent); }
+  .node.terminal .node-num { background: var(--green-dim); color: var(--green); }
+  .node.error .node-num { background: var(--red-dim); color: var(--red); }
+
+  .arrow { display: flex; align-items: center; justify-content: center; padding: 6px 0; color: var(--text-dim); font-size: 20px; user-select: none; }
+  .arrow-down::after { content: '\2193'; }
+
+  .branch-container {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    padding: 20px 0 20px 40px;
+    border-left: 2px dashed var(--border);
+    margin-left: 20px;
+  }
+  .branch-label {
+    font-size: 11px; font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 4px 10px; border-radius: 6px;
+    margin-bottom: 8px; display: inline-block;
+  }
+  .branch-label.clean { background: var(--green-dim); color: var(--green); }
+  .branch-label.inform { background: var(--yellow-dim); color: var(--yellow); }
+  .branch-label.action { background: var(--accent-glow); color: var(--accent); }
+  .branch-label.error { background: var(--red-dim); color: var(--red); }
+
+  .branch-path {
+    flex: 1; min-width: 200px; padding: 16px;
+    border-radius: 12px; border: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+  .branch-path .node { min-width: unset; width: 100%; margin-top: 8px; }
+
+  /* Triggers */
+  .trigger-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .trigger-card {
+    padding: 28px; border-radius: 16px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    text-align: center;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .trigger-icon { font-size: 32px; margin-bottom: 14px; display: block; }
+  .trigger-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 8px; font-family: 'JetBrains Mono', monospace; }
+  .trigger-card p { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+  .trigger-meta { margin-top: 14px; font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+
+  /* Signals Table */
+  .signals-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .signals-table th {
+    text-align: left; padding: 14px 16px;
+    border-bottom: 2px solid var(--border);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .signals-table td { padding: 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .signals-table tr { transition: background 0.2s; }
+  .signals-table tr:hover td { background: var(--bg-card); }
+  .signal-name { font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 13px; }
+  .signal-tag {
+    display: inline-block; padding: 3px 10px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+  }
+  .tag-inform { background: var(--yellow-dim); color: var(--yellow); }
+  .tag-action { background: var(--accent-glow); color: var(--accent); }
+
+  /* Tools */
+  .tools-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .tool-card {
+    padding: 20px 24px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .tool-name { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: var(--cyan); margin-bottom: 6px; }
+  .tool-desc { font-size: 12px; color: var(--text-muted); }
+  .tool-source { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; margin-top: 8px; }
+
+  /* Actions */
+  .actions-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .action-card {
+    padding: 24px 16px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    text-align: center;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .action-card:hover { border-color: var(--accent); background: var(--accent-glow); }
+  .action-method {
+    font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    padding: 3px 10px; border-radius: 4px; display: inline-block; margin-bottom: 10px;
+  }
+  .method-patch { background: var(--yellow-dim); color: var(--yellow); }
+  .method-post { background: var(--green-dim); color: var(--green); }
+  .action-name { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; margin-bottom: 4px; }
+  .action-desc { font-size: 11px; color: var(--text-muted); }
+
+  /* Chat Examples */
+  .chat-examples { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .chat-example {
+    border-radius: 16px; border: 1px solid var(--border);
+    background: var(--bg-card); overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .chat-header {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+  }
+  .chat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .chat-messages { padding: 18px; }
+  .chat-msg {
+    padding: 12px 16px; border-radius: 12px; margin-bottom: 12px;
+    font-size: 13px; line-height: 1.6; max-width: 85%;
+  }
+  .chat-msg.user {
+    background: var(--blue-dim); border: 1px solid rgba(59, 130, 246, 0.2);
+    margin-left: auto; text-align: right;
+  }
+  .chat-msg.agent {
+    background: var(--bg-card-hover); border: 1px solid var(--border);
+  }
+  .chat-msg .citation {
+    display: block; font-size: 11px; color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace; margin-top: 8px;
+  }
+  .chat-msg .action-btn {
+    display: inline-block; margin-top: 10px;
+    padding: 6px 14px; border-radius: 8px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .action-btn.approve { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .action-btn.approve:hover { background: rgba(34,197,94,0.25); }
+  .action-btn.dismiss { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.3); margin-left: 6px; }
+  .action-btn.dismiss:hover { background: rgba(239,68,68,0.25); }
+
+  /* Audience */
+  .audience-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .audience-card {
+    padding: 32px; border-radius: 16px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .audience-card h4 { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+  .audience-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.7; }
+  .audience-card .benefit { font-size: 12px; color: var(--accent); font-weight: 600; }
+
+  /* Stack */
+  .stack-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+  .stack-chip {
+    padding: 10px 18px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    font-size: 13px; font-family: 'JetBrains Mono', monospace;
+    font-weight: 500; color: var(--text-muted);
+    transition: all 0.2s;
+  }
+  .stack-chip:hover { border-color: var(--border-active); background: var(--bg-card-hover); }
+  .stack-chip .stack-highlight { color: var(--text); }
+
+  /* Architecture Diagram */
+  .arch-diagram {
+    display: grid; grid-template-columns: 200px 1fr 200px;
+    gap: 24px; align-items: center; padding: 36px;
+    border-radius: 16px; border: 1px solid var(--border);
+    background: var(--bg-card); margin-bottom: 48px;
+  }
+  .arch-col { display: flex; flex-direction: column; gap: 12px; }
+  .arch-box {
+    padding: 14px 16px; border-radius: 10px;
+    border: 1px solid var(--border); font-size: 12px;
+    text-align: center; font-family: 'JetBrains Mono', monospace;
+    font-weight: 500; transition: all 0.2s;
+  }
+  .arch-box:hover { transform: scale(1.03); }
+  .arch-box.input { background: var(--blue-dim); border-color: rgba(59,130,246,0.3); color: var(--blue); }
+  .arch-box.output { background: var(--green-dim); border-color: rgba(34,197,94,0.3); color: var(--green); }
+  .arch-center {
+    text-align: center; padding: 40px 32px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--accent-glow), transparent);
+  }
+  .arch-center h3 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+  .arch-center p { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+
+  /* Footer */
+  footer {
+    padding: 60px 40px; text-align: center;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 14px;
+  }
+  footer strong { color: var(--accent); }
+
+  /* Separator */
+  .sep { border: none; border-top: 1px solid var(--border); margin: 0; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .problem-grid, .chat-examples, .tools-grid { grid-template-columns: 1fr; }
+    .trigger-grid { grid-template-columns: repeat(2, 1fr); }
+    .actions-grid { grid-template-columns: repeat(2, 1fr); }
+    .audience-grid { grid-template-columns: 1fr; }
+    .arch-diagram { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 40px; }
+    .hero-stats { flex-wrap: wrap; gap: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <canvas id="particles-canvas"></canvas>
+  <div class="hero-badge shiny-text blur-in">Ship Execution-Drift Agent</div>
+  <h1>
+    <span class="blur-in blur-in-delay-1">Fleet</span><span class="blur-in blur-in-delay-2 accent">Graph</span>
+  </h1>
+  <p class="hero-sub blur-in blur-in-delay-3">
+    Catches execution drift before the sprint slips.<br>
+    Embedded in Ship, grounded in evidence, gated by humans.
+  </p>
+  <div class="hero-stats blur-in blur-in-delay-4">
+    <div class="hero-stat">
+      <div class="num count-up" data-target="14">0</div>
+      <div class="label">Graph Nodes</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num count-up" data-target="10">0</div>
+      <div class="label">Chat Tools</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num count-up" data-target="5">0</div>
+      <div class="label">Ship Actions</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num count-up" data-target="4">0</div>
+      <div class="label">Trigger Types</div>
+    </div>
+  </div>
+</div>
+
+<hr class="sep">
+
+<!-- WHO & WHY -->
+<section>
+  <div class="section-label shiny-text reveal">The Problem</div>
+  <h2 class="reveal">Why FleetGraph Exists</h2>
+  <p class="subtitle reveal">Teams discover drift too late. By the time a manager notices stale issues, missed standups, and blocked approvals, the sprint is already slipping.</p>
+  <div class="problem-grid stagger-children">
+    <div class="problem-card spotlight-card reveal" style="--stagger:0;--spotlight-color:rgba(239,68,68,0.06);">
+      <h3>Without FleetGraph</h3>
+      <ul>
+        <li>Stale issues sit untouched for weeks</li>
+        <li>Missed standups go unnoticed until retro</li>
+        <li>Approval bottlenecks block downstream work silently</li>
+        <li>Scope drift creeps in undetected</li>
+        <li>Managers manually piece together status from 5 different views</li>
+      </ul>
+    </div>
+    <div class="solution-card spotlight-card reveal" style="--stagger:1;--spotlight-color:rgba(34,197,94,0.06);">
+      <h3>With FleetGraph</h3>
+      <ul>
+        <li>Stale issues flagged after 7 days of inactivity</li>
+        <li>Missing standups surfaced same-day</li>
+        <li>Approval bottlenecks detected at 3-day threshold</li>
+        <li>Scope drift caught via content analysis (topic mismatch, dangerous patterns)</li>
+        <li>One contextual panel with evidence-backed signals</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- AUDIENCE -->
+<section>
+  <div class="section-label shiny-text reveal">Who This Is For</div>
+  <h2 class="reveal">Target Users</h2>
+  <p class="subtitle reveal">FleetGraph serves different roles with the same underlying intelligence.</p>
+  <div class="audience-grid stagger-children">
+    <div class="audience-card spotlight-card glare-hover reveal" style="--stagger:0;">
+      <h4>Engineering Managers</h4>
+      <p>Get proactive alerts when direct reports miss standups, issues go stale, or sprint health degrades. No more manual status aggregation.</p>
+      <div class="benefit">Earlier signal, less hunting</div>
+    </div>
+    <div class="audience-card spotlight-card glare-hover reveal" style="--stagger:1;">
+      <h4>Individual Contributors</h4>
+      <p>Ask contextual questions about any issue, sprint, or project. Get evidence-backed answers grounded in Ship data, not hallucinations.</p>
+      <div class="benefit">Answers scoped to your current work</div>
+    </div>
+    <div class="audience-card spotlight-card glare-hover reveal" style="--stagger:2;">
+      <h4>Program Leads</h4>
+      <p>Monitor execution drift across projects and sprints. Workspace-level signals surface cross-team accountability gaps.</p>
+      <div class="benefit">Drift detection at scale</div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- ARCHITECTURE -->
+<section>
+  <div class="section-label shiny-text reveal">Architecture</div>
+  <h2 class="reveal">How It Works</h2>
+  <p class="subtitle reveal">LangGraph orchestrates a typed state machine. Deterministic filters run first. LLM reasons only when needed. Actions require human approval.</p>
+
+  <div class="arch-diagram spotlight-card reveal" style="--spotlight-color:rgba(255,107,53,0.05);">
+    <div class="arch-col stagger-children">
+      <div class="arch-box input reveal" style="--stagger:0;">Sweep (4min)</div>
+      <div class="arch-box input reveal" style="--stagger:1;">Page View</div>
+      <div class="arch-box input reveal" style="--stagger:2;">On-Demand</div>
+      <div class="arch-box input reveal" style="--stagger:3;">GitHub Webhook</div>
+    </div>
+    <div class="arch-center star-border" style="border-radius:16px;">
+      <h3>LangGraph Runtime</h3>
+      <p>14 nodes, 3 conditional branches,<br>Postgres checkpointing, LangSmith traces</p>
+    </div>
+    <div class="arch-col stagger-children">
+      <div class="arch-box output reveal" style="--stagger:0;">Clean Exit</div>
+      <div class="arch-box output reveal" style="--stagger:1;">Alert Notification</div>
+      <div class="arch-box output reveal" style="--stagger:2;">Gated Action</div>
+      <div class="arch-box reveal" style="--stagger:3;background:var(--red-dim);border-color:rgba(239,68,68,0.3);color:var(--red);">Error Fallback</div>
+    </div>
+  </div>
+
+  <div class="section-label shiny-text reveal">Tech Stack</div>
+  <div class="stack-row stagger-children">
+    <div class="stack-chip reveal" style="--stagger:0;"><span class="stack-highlight">LangGraph JS</span> orchestration</div>
+    <div class="stack-chip reveal" style="--stagger:1;"><span class="stack-highlight">OpenAI</span> gpt-4o-mini</div>
+    <div class="stack-chip reveal" style="--stagger:2;"><span class="stack-highlight">LangSmith</span> tracing</div>
+    <div class="stack-chip reveal" style="--stagger:3;"><span class="stack-highlight">PostgreSQL</span> persistence</div>
+    <div class="stack-chip reveal" style="--stagger:4;"><span class="stack-highlight">Express</span> API</div>
+    <div class="stack-chip reveal" style="--stagger:5;"><span class="stack-highlight">React + Vite</span> frontend</div>
+    <div class="stack-chip reveal" style="--stagger:6;"><span class="stack-highlight">WebSocket</span> realtime alerts</div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- GRAPH NODES -->
+<section>
+  <div class="section-label shiny-text reveal">Graph Topology</div>
+  <h2 class="reveal">All 14 Nodes</h2>
+  <p class="subtitle reveal">The graph flows top-to-bottom with three conditional branch points. Each node has a single responsibility.</p>
+
+  <div class="graph-flow">
+    <!-- Phase 1 -->
+    <div class="graph-phase">
+      <div class="phase-label reveal">Phase 1: Context Gathering</div>
+      <div class="graph-row">
+        <div class="node entry spotlight-card reveal" style="--spotlight-color:rgba(59,130,246,0.08);">
+          <div class="node-num">1</div>
+          <div class="node-body">
+            <div class="node-name">trigger_context</div>
+            <div class="node-desc">Entry waypoint. Captures entityType, entityId, timestamps.</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow arrow-down reveal"></div>
+      <div class="graph-row">
+        <div class="node data spotlight-card reveal" style="--spotlight-color:rgba(6,182,212,0.08);">
+          <div class="node-num">2</div>
+          <div class="node-body">
+            <div class="node-name">fetch_core_context</div>
+            <div class="node-desc">Loads primary entity + related docs from Ship API.</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow arrow-down reveal"></div>
+      <div class="graph-row">
+        <div class="node data spotlight-card reveal" style="--spotlight-color:rgba(6,182,212,0.08);">
+          <div class="node-num">3</div>
+          <div class="node-body">
+            <div class="node-name">fetch_parallel_signals</div>
+            <div class="node-desc">Fan-out: activity heatmap, accountability items, issue history, manager items.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow arrow-down reveal"></div>
+
+    <!-- Phase 2 -->
+    <div class="graph-phase">
+      <div class="phase-label reveal">Phase 2: Signal Detection</div>
+      <div class="graph-row">
+        <div class="node logic spotlight-card reveal" style="--spotlight-color:rgba(234,179,8,0.08);">
+          <div class="node-num">4</div>
+          <div class="node-body">
+            <div class="node-name">heuristic_filter</div>
+            <div class="node-desc">Deterministic threshold checks. Builds candidate list. No LLM tokens spent.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow arrow-down reveal"></div>
+
+    <!-- Branch 1 -->
+    <div class="graph-phase reveal">
+      <div class="phase-label">Branch Point: afterHeuristic</div>
+      <div class="branch-container">
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(34,197,94,0.06);">
+          <span class="branch-label clean">clean</span>
+          <div class="node terminal">
+            <div class="node-num">11</div>
+            <div class="node-body">
+              <div class="node-name">log_clean_run</div>
+              <div class="node-desc">No candidates found. Log audit entry, exit.</div>
+            </div>
+          </div>
+        </div>
+        <div class="branch-path spotlight-card" style="flex:2;--spotlight-color:rgba(168,85,247,0.06);">
+          <span class="branch-label inform">candidates found</span>
+          <div class="node llm">
+            <div class="node-num">5</div>
+            <div class="node-body">
+              <div class="node-name">reason_about_risk</div>
+              <div class="node-desc">LLM assessment via gpt-4o-mini. Produces summary, recommendation, citations, optional action.</div>
+            </div>
+          </div>
+        </div>
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(239,68,68,0.06);">
+          <span class="branch-label error">error</span>
+          <div class="node error">
+            <div class="node-num">14</div>
+            <div class="node-body">
+              <div class="node-name">error_fallback</div>
+              <div class="node-desc">Log error, exit gracefully.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow arrow-down reveal"></div>
+
+    <!-- Branch 2 -->
+    <div class="graph-phase reveal">
+      <div class="phase-label">Branch Point: afterReason</div>
+      <div class="branch-container">
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(234,179,8,0.06);">
+          <span class="branch-label inform">inform_only</span>
+          <div class="node terminal">
+            <div class="node-num">6</div>
+            <div class="node-body">
+              <div class="node-name">prepare_notification</div>
+              <div class="node-desc">Format alert for delivery.</div>
+            </div>
+          </div>
+          <div class="arrow arrow-down"></div>
+          <div class="node terminal">
+            <div class="node-num">7</div>
+            <div class="node-body">
+              <div class="node-name">deliver_alert</div>
+              <div class="node-desc">Persist alert + broadcast via WebSocket.</div>
+            </div>
+          </div>
+        </div>
+        <div class="branch-path spotlight-card" style="flex:1.5;--spotlight-color:rgba(255,107,53,0.06);">
+          <span class="branch-label action">confirm_action</span>
+          <div class="node action">
+            <div class="node-num">8</div>
+            <div class="node-body">
+              <div class="node-name">prepare_action</div>
+              <div class="node-desc">Persist alert + create approval record (72hr expiry).</div>
+            </div>
+          </div>
+          <div class="arrow arrow-down"></div>
+          <div class="node action star-border" style="border-radius:12px;">
+            <div class="node-num">9</div>
+            <div class="node-body">
+              <div class="node-name">human_gate</div>
+              <div class="node-desc">LangGraph interrupt(). Pauses until approve / dismiss / snooze.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow arrow-down reveal"></div>
+
+    <!-- Branch 3 -->
+    <div class="graph-phase reveal">
+      <div class="phase-label">Branch Point: afterGate</div>
+      <div class="branch-container">
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(34,197,94,0.06);">
+          <span class="branch-label clean">approve</span>
+          <div class="node action">
+            <div class="node-num">10</div>
+            <div class="node-body">
+              <div class="node-name">execute_action</div>
+              <div class="node-desc">Dispatch PATCH/POST to Ship API. Audit log.</div>
+            </div>
+          </div>
+        </div>
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(234,179,8,0.06);">
+          <span class="branch-label inform">dismiss</span>
+          <div class="node terminal">
+            <div class="node-num">12</div>
+            <div class="node-body">
+              <div class="node-name">log_dismissal</div>
+              <div class="node-desc">Audit entry for dismissed alert.</div>
+            </div>
+          </div>
+        </div>
+        <div class="branch-path spotlight-card" style="--spotlight-color:rgba(234,179,8,0.06);">
+          <span class="branch-label inform">snooze</span>
+          <div class="node terminal">
+            <div class="node-num">13</div>
+            <div class="node-body">
+              <div class="node-name">log_snooze</div>
+              <div class="node-desc">Audit entry + snoozeUntil timestamp.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- TRIGGERS -->
+<section>
+  <div class="section-label shiny-text reveal">Entry Points</div>
+  <h2 class="reveal">4 Trigger Types</h2>
+  <p class="subtitle reveal">FleetGraph activates through multiple paths. Each trigger feeds the same graph with different context.</p>
+
+  <div class="trigger-grid stagger-children">
+    <div class="trigger-card spotlight-card glare-hover reveal" style="--stagger:0;--spotlight-color:rgba(59,130,246,0.08);">
+      <span class="trigger-icon" style="color:var(--blue);">&#x21BB;</span>
+      <h4>sweep</h4>
+      <p>Proactive scheduler. Enumerates active sprints, computes digests, runs only on changed entities.</p>
+      <div class="trigger-meta">every 4 min</div>
+    </div>
+    <div class="trigger-card spotlight-card glare-hover reveal" style="--stagger:1;--spotlight-color:rgba(6,182,212,0.08);">
+      <span class="trigger-icon" style="color:var(--cyan);">&#x25CE;</span>
+      <h4>on_demand</h4>
+      <p>User clicks "Analyze Now". Immediate graph invoke, bypasses queue. Returns assessment in response.</p>
+      <div class="trigger-meta">POST /on-demand</div>
+    </div>
+    <div class="trigger-card spotlight-card glare-hover reveal" style="--stagger:2;--spotlight-color:rgba(168,85,247,0.08);">
+      <span class="trigger-icon" style="color:var(--purple);">&#x1F441;</span>
+      <h4>page_view</h4>
+      <p>Auto-fires when user opens an entity page. 15-min staleness check, 2s debounce. Background queue.</p>
+      <div class="trigger-meta">POST /page-view</div>
+    </div>
+    <div class="trigger-card spotlight-card glare-hover reveal" style="--stagger:3;--spotlight-color:rgba(34,197,94,0.08);">
+      <span class="trigger-icon" style="color:var(--green);">&#x2B82;</span>
+      <h4>github_webhook</h4>
+      <p>Push/PR events. HMAC-SHA256 verified. Extracts issue refs (#123, SHP-123, UUID), resolves to Ship docs.</p>
+      <div class="trigger-meta">POST /webhooks/github</div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- SIGNALS -->
+<section>
+  <div class="section-label shiny-text reveal">Detection</div>
+  <h2 class="reveal">5 Drift Signals</h2>
+  <p class="subtitle reveal">Heuristic filters detect these signals deterministically before any LLM tokens are spent.</p>
+
+  <div class="reveal">
+    <table class="signals-table">
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>Detection Rule</th>
+          <th>Threshold</th>
+          <th>Typical Branch</th>
+          <th>Example</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="signal-name">stale_issue</span></td>
+          <td>Issue in <code>in_progress</code> or <code>in_review</code> with no recent activity</td>
+          <td><span class="mono" style="color:var(--yellow);">7 days</span></td>
+          <td><span class="signal-tag tag-action">confirm_action</span></td>
+          <td>"AUTH-42 has had no updates in 9 days. Reassign or update status?"</td>
+        </tr>
+        <tr>
+          <td><span class="signal-name">missing_standup</span></td>
+          <td>User's daily standup is overdue</td>
+          <td><span class="mono" style="color:var(--yellow);">same day</span></td>
+          <td><span class="signal-tag tag-inform">inform_only</span></td>
+          <td>"You haven't posted today's standup yet."</td>
+        </tr>
+        <tr>
+          <td><span class="signal-name">approval_bottleneck</span></td>
+          <td>Review/approval items pending beyond threshold</td>
+          <td><span class="mono" style="color:var(--yellow);">3 days</span></td>
+          <td><span class="signal-tag tag-inform">inform_only</span></td>
+          <td>"3 items awaiting your review, oldest is 5 days."</td>
+        </tr>
+        <tr>
+          <td><span class="signal-name">scope_drift</span></td>
+          <td>3-layer: dangerous patterns, content removal (80%+), topic mismatch</td>
+          <td><span class="mono" style="color:var(--yellow);">immediate</span></td>
+          <td><span class="signal-tag tag-action">confirm_action</span></td>
+          <td>"Issue content diverged from sprint goal. Flag for review?"</td>
+        </tr>
+        <tr>
+          <td><span class="signal-name">manager_missing_standup</span></td>
+          <td>Direct report's standup overdue beyond threshold</td>
+          <td><span class="mono" style="color:var(--yellow);">5 min</span></td>
+          <td><span class="signal-tag tag-inform">inform_only</span></td>
+          <td>"2 direct reports haven't posted standups today."</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- CHAT TOOLS -->
+<section>
+  <div class="section-label shiny-text reveal">Chat Runtime</div>
+  <h2 class="reveal">10 Chat Tools</h2>
+  <p class="subtitle reveal">The embedded chat uses OpenAI tool-calling with these typed functions. Each tool fetches real Ship data.</p>
+
+  <div class="tools-grid stagger-children">
+    <div class="tool-card spotlight-card reveal" style="--stagger:0;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_issue_context</div>
+      <div class="tool-desc">Full issue doc + change history + children + associations + drift analysis</div>
+      <div class="tool-source">GET /api/issues/:id + related</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:1;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_sprint_context</div>
+      <div class="tool-desc">Sprint overview + all issues + standup/review entries</div>
+      <div class="tool-source">GET /api/claude/context?context_type=standup</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:2;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_project_context</div>
+      <div class="tool-desc">Project document + retro signals + content drift analysis</div>
+      <div class="tool-source">GET /api/documents/:id + analysis</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:3;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_project_summary</div>
+      <div class="tool-desc">Issue counts by state, sprint counts, assignee workload distribution</div>
+      <div class="tool-source">GET /api/issues?project + aggregation</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:4;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_sprint_summary</div>
+      <div class="tool-desc">Issue counts, project breakdown, per-assignee load metrics</div>
+      <div class="tool-source">GET /api/weeks/:id + aggregation</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:5;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_workspace_signals</div>
+      <div class="tool-desc">Workspace-level accountability gaps + cross-sprint signals</div>
+      <div class="tool-source">GET /api/accountability/action-items</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:6;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_entity_drift</div>
+      <div class="tool-desc">Drift detection for any entity type (stale, scope, bottleneck)</div>
+      <div class="tool-source">Heuristic analysis pipeline</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:7;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_related_documents</div>
+      <div class="tool-desc">All document associations (parent, project, sprint, program)</div>
+      <div class="tool-source">GET /api/documents/:id/associations</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:8;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">fetch_document_content</div>
+      <div class="tool-desc">Full document body text for page-aware Q&A</div>
+      <div class="tool-source">GET /api/documents/:id (content field)</div>
+    </div>
+    <div class="tool-card spotlight-card reveal" style="--stagger:9;--spotlight-color:rgba(6,182,212,0.06);">
+      <div class="tool-name">call_ship_api</div>
+      <div class="tool-desc">Generic GET-only Ship API proxy for any endpoint</div>
+      <div class="tool-source">GET /api/* (read-only)</div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- SHIP ACTIONS -->
+<section>
+  <div class="section-label shiny-text reveal">Write Path</div>
+  <h2 class="reveal">5 Gated Actions</h2>
+  <p class="subtitle reveal">Every write action requires human approval through the HITL gate. Validation fails closed.</p>
+
+  <div class="actions-grid stagger-children">
+    <div class="action-card spotlight-card glare-hover reveal" style="--stagger:0;--spotlight-color:rgba(255,107,53,0.08);">
+      <span class="action-method method-patch">PATCH</span>
+      <div class="action-name">reassign_issue</div>
+      <div class="action-desc">Change issue assignee</div>
+    </div>
+    <div class="action-card spotlight-card glare-hover reveal" style="--stagger:1;--spotlight-color:rgba(255,107,53,0.08);">
+      <span class="action-method method-patch">PATCH</span>
+      <div class="action-name">change_state</div>
+      <div class="action-desc">Update issue state</div>
+    </div>
+    <div class="action-card spotlight-card glare-hover reveal" style="--stagger:2;--spotlight-color:rgba(255,107,53,0.08);">
+      <span class="action-method method-patch">PATCH</span>
+      <div class="action-name">escalate_priority</div>
+      <div class="action-desc">Raise issue priority</div>
+    </div>
+    <div class="action-card spotlight-card glare-hover reveal" style="--stagger:3;--spotlight-color:rgba(255,107,53,0.08);">
+      <span class="action-method method-patch">PATCH</span>
+      <div class="action-name">flag_issue</div>
+      <div class="action-desc">Set priority to urgent</div>
+    </div>
+    <div class="action-card spotlight-card glare-hover reveal" style="--stagger:4;--spotlight-color:rgba(34,197,94,0.08);">
+      <span class="action-method method-post">POST</span>
+      <div class="action-name">add_comment</div>
+      <div class="action-desc">Post comment on issue</div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- CHAT EXAMPLES -->
+<section>
+  <div class="section-label shiny-text reveal">Live Examples</div>
+  <h2 class="reveal">Chat Scenarios</h2>
+  <p class="subtitle reveal">Real conversations you can demo. Each shows a different capability.</p>
+
+  <div class="chat-examples stagger-children">
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:0;--spotlight-color:rgba(59,130,246,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Sprint Health Check</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">How's this sprint looking?</div>
+        <div class="chat-msg agent">
+          Sprint "Week 12" has 14 issues. 3 are stale (no activity >7 days): AUTH-42, API-19, UI-88. 2 items have been in review for 5 days with no approver action. Overall velocity is 40% below last sprint at this point.
+          <span class="citation">via fetch_sprint_context, fetch_sprint_summary</span>
+        </div>
+        <div class="chat-msg user">Which stale issues should I worry about most?</div>
+        <div class="chat-msg agent">
+          AUTH-42 is highest risk. It's blocking 2 downstream issues (AUTH-45, AUTH-46) and the assignee hasn't logged a standup in 3 days. Recommend reassigning or pinging for status update.
+          <span class="citation">via fetch_issue_context, fetch_entity_drift</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:1;--spotlight-color:rgba(255,107,53,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Scope Drift Detection</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">Is this issue still on track?</div>
+        <div class="chat-msg agent">
+          Scope drift detected. The issue title is "Add OAuth login" but the latest content discusses database migration patterns and caching strategies. The content has diverged significantly from the sprint goal.
+          <br><br>
+          I recommend flagging this for review.
+          <span class="citation">via fetch_issue_context, fetch_entity_drift</span>
+          <br>
+          <span class="action-btn approve">Approve: Flag Issue</span>
+          <span class="action-btn dismiss">Dismiss</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:2;--spotlight-color:rgba(168,85,247,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Manager Accountability</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">What are my action items?</div>
+        <div class="chat-msg agent">
+          You have 4 pending action items:<br><br>
+          1. Review PR for API-19 (pending 5 days)<br>
+          2. Approve sprint scope change for Week 12<br>
+          3. 2 direct reports (Sarah, James) missed today's standup<br>
+          4. Project "Auth Rewrite" has no retro filed for last sprint
+          <span class="citation">via fetch_workspace_signals, deterministic path</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:3;--spotlight-color:rgba(6,182,212,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Page-Aware Q&A</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">Summarize what's on this page</div>
+        <div class="chat-msg agent">
+          This is issue API-19 "Implement rate limiting middleware". It's currently in_review, assigned to Sarah, part of Sprint Week 12 under the "API Platform" project.
+          <br><br>
+          The document describes a token-bucket algorithm with Redis backing. Last edit was 6 days ago. There's one open review comment from James about error response format.
+          <span class="citation">via fetch_document_content, fetch_issue_context</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:4;--spotlight-color:rgba(34,197,94,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Project Overview</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">Give me a summary of the Auth Rewrite project</div>
+        <div class="chat-msg agent">
+          Auth Rewrite has 23 total issues across 3 sprints:<br>
+          &bull; 8 done, 9 in progress, 4 in review, 2 backlog<br>
+          &bull; 3 assignees: Sarah (11), James (8), Alex (4)<br>
+          &bull; Sarah's load is 38% above team average<br>
+          &bull; Completion rate this sprint: 55% (target: 80%)<br><br>
+          Risk: The sprint is 60% through but only 55% complete. Two stale issues may need re-scoping.
+          <span class="citation">via fetch_project_context, fetch_project_summary</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-example spotlight-card glare-hover reveal" style="--stagger:5;--spotlight-color:rgba(255,107,53,0.05);">
+      <div class="chat-header"><div class="chat-dot pulse-dot"></div>Gated Write Action</div>
+      <div class="chat-messages">
+        <div class="chat-msg user">AUTH-42 has been stuck. Can we reassign it?</div>
+        <div class="chat-msg agent">
+          AUTH-42 "Fix session timeout handling" has been in_progress for 12 days with no commits or comments since day 3. The current assignee (James) has 7 other active issues.
+          <br><br>
+          I recommend reassigning to Alex (current load: 4 issues, 2 completed this sprint).
+          <br>
+          <span class="action-btn approve">Approve: Reassign to Alex</span>
+          <span class="action-btn dismiss">Dismiss</span>
+          <span class="citation">72hr approval window, CAS-guarded</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- SAFETY -->
+<section>
+  <div class="section-label shiny-text reveal">Safety Model</div>
+  <h2 class="reveal">Human-in-the-Loop Guarantees</h2>
+  <p class="subtitle reveal">FleetGraph is designed to inform and recommend, never to act unilaterally.</p>
+
+  <div class="problem-grid stagger-children">
+    <div class="solution-card spotlight-card reveal" style="--stagger:0;background:var(--bg-card);border-color:var(--border);--spotlight-color:rgba(6,182,212,0.06);">
+      <h3 style="color:var(--cyan);">Read Path (Always On)</h3>
+      <ul>
+        <li style="color:var(--text-muted);">Chat tools are GET-only (read Ship data)</li>
+        <li style="color:var(--text-muted);">Deterministic filters run before LLM</li>
+        <li style="color:var(--text-muted);">Sensitive keywords blocked (API keys, passwords)</li>
+        <li style="color:var(--text-muted);">Rate limited: 12 msg/min in production</li>
+        <li style="color:var(--text-muted);">Every run traced in LangSmith</li>
+      </ul>
+    </div>
+    <div class="solution-card spotlight-card star-border reveal" style="--stagger:1;border-radius:16px;--spotlight-color:rgba(255,107,53,0.06);">
+      <h3 style="color:var(--accent);">Write Path (Gated)</h3>
+      <ul>
+        <li style="color:var(--text-muted);">All writes require explicit human approval</li>
+        <li style="color:var(--text-muted);">Approval expires after 72 hours</li>
+        <li style="color:var(--text-muted);">CAS guard: WHERE status = 'pending' (no double-execute)</li>
+        <li style="color:var(--text-muted);">Validation fails closed (reject on bad payload)</li>
+        <li style="color:var(--text-muted);">Full audit trail in fleetgraph_audit_log</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<!-- CLOSING -->
+<footer>
+  <p class="reveal" style="font-size:18px;color:var(--text-muted);max-width:700px;margin:0 auto;line-height:1.7;">
+    <strong>FleetGraph</strong> is the layer that notices when execution starts to drift, tells the team why, and helps them correct course before the plan becomes fiction.
+  </p>
+  <br>
+  <p class="reveal" style="font-size:11px;">Built for Ship &middot; LangGraph + OpenAI gpt-4o-mini &middot; Postgres-backed &middot; LangSmith-traced</p>
+</footer>
+
+<!-- ===== SCRIPTS ===== -->
+<script>
+// ===== REACTBITS: Particles Background =====
+(function() {
+  const canvas = document.getElementById('particles-canvas');
+  const ctx = canvas.getContext('2d');
+  const hero = canvas.parentElement;
+  let particles = [];
+  const PARTICLE_COUNT = 60;
+  const MAX_DIST = 120;
+
+  function resize() {
+    canvas.width = hero.offsetWidth;
+    canvas.height = hero.offsetHeight;
+  }
+
+  function createParticle() {
+    return {
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      r: Math.random() * 1.5 + 0.5,
+      opacity: Math.random() * 0.3 + 0.1
+    };
+  }
+
+  function init() {
+    resize();
+    particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(createParticle());
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw connections
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < MAX_DIST) {
+          const alpha = (1 - dist / MAX_DIST) * 0.08;
+          ctx.strokeStyle = `rgba(255, 107, 53, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw particles
+    for (const p of particles) {
+      ctx.fillStyle = `rgba(255, 107, 53, ${p.opacity})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', () => { resize(); });
+  init();
+  draw();
+})();
+
+// ===== REACTBITS: CountUp =====
+(function() {
+  const counters = document.querySelectorAll('.count-up');
+  const duration = 1200;
+
+  function animateCount(el) {
+    const target = parseInt(el.dataset.target, 10);
+    const start = performance.now();
+
+    function step(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      el.textContent = Math.round(target * eased);
+      if (progress < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        animateCount(entry.target);
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.5 });
+
+  counters.forEach(el => observer.observe(el));
+})();
+
+// ===== REACTBITS: ScrollReveal / AnimatedContent =====
+(function() {
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+
+  reveals.forEach(el => observer.observe(el));
+})();
+
+// ===== REACTBITS: SpotlightCard =====
+(function() {
+  document.querySelectorAll('.spotlight-card').forEach(card => {
+    card.addEventListener('mousemove', (e) => {
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      card.style.setProperty('--mouse-x', `${x}px`);
+      card.style.setProperty('--mouse-y', `${y}px`);
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

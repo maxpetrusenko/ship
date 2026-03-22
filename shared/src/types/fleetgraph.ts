@@ -42,7 +42,8 @@ export type FleetGraphActionType =
   | 'change_state'
   | 'escalate_priority'
   | 'flag_issue'
-  | 'add_comment';
+  | 'add_comment'
+  | 'update_content';
 
 export interface ReassignIssuePayload {
   assignee_id: string;
@@ -65,12 +66,18 @@ export interface AddCommentPayload {
   content: string;
 }
 
+export interface UpdateContentPayload {
+  /** Plain-text content to set as the document body. Converted to TipTap JSON internally. */
+  content: string;
+}
+
 export type FleetGraphActionPayload =
   | ReassignIssuePayload
   | ChangeStatePayload
   | EscalatePriorityPayload
   | FlagIssuePayload
-  | AddCommentPayload;
+  | AddCommentPayload
+  | UpdateContentPayload;
 
 // ---------------------------------------------------------------------------
 // Signal thresholds (conservative defaults from FLEETGRAPH.md)

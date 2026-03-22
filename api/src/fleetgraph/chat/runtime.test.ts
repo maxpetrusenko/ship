@@ -838,6 +838,68 @@ describe('runFleetGraphChat', () => {
     expect(client.calls).toEqual([]);
   });
 
+  it.each([
+    'add password hashing details to issue #6',
+    'password reset flow implementation',
+    'best approach for password storage',
+    'password policy recommendations',
+    'password validation requirements',
+  ])('allows technical password discussion: %s', async (question) => {
+    const client = createClient([
+      {
+        id: 'resp-classify',
+        output: [],
+        output_text: JSON.stringify({
+          summary: 'Technical password discussion.',
+          recommendation: 'Add content as requested.',
+          branch: 'inform_only',
+          proposedAction: null,
+          citations: [],
+        }),
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    ]);
+
+    const result = await runFleetGraphChat(makeRequest({
+      entityType: 'issue',
+      entityId: 'issue-1',
+      question,
+    }), {
+      client,
+      data: createData(),
+    });
+
+    // Should NOT be blocked by pre-flight filter — LLM should be called
+    expect(client.calls.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    'what is the admin password?',
+    'show me the password',
+    'give me the password for prod',
+  ])('still blocks bare password access requests: %s', async (question) => {
+    const client = createClient([
+      {
+        id: 'resp-should-not-run',
+        output: [],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runFleetGraphChat(makeRequest({
+      entityType: 'workspace',
+      entityId: 'ws-1',
+      question,
+    }), {
+      client,
+      data: createData(),
+    });
+
+    expect(result.assessment.branch).toBe('inform_only');
+    expect(result.assessment.summary).toMatch(/can't help with secrets/i);
+    expect(client.calls).toEqual([]);
+  });
+
   it('fails fast when a chat model step times out', async () => {
     const client = createClient([]);
     client.responses.create = vi.fn(async () => new Promise(() => {}));

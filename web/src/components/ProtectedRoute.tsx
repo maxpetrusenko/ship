@@ -18,6 +18,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   }
 
   if (!user) {
+    // Root path → landing page; all other routes → login
+    if (location.pathname === '/') {
+      window.location.href = '/home.html';
+      return null;
+    }
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

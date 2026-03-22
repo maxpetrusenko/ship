@@ -446,7 +446,7 @@ function classifyBlockedQuestion(question: string): FleetGraphChatRuntimeAssessm
     return null;
   }
 
-  const sensitiveTarget = /(secret|password|api[\s_-]?key|token|credential|private key|ssh key|\.env|env vars?|database|db\b|database url|connection string|deployment|deploy config|production server|prod server|access details?|infra(?:structure)?|hostinger|ssh access)/i;
+  const sensitiveTarget = /\b(secret|password\b(?!\s+(?:hash(?:ing)?|reset|policy|management|validation|strength|complexity|encoding|storage|rotation|requirements?|implementation|approach|algorithm|flow|verification|auth(?:entication)?))|api[\s_-]?key|token\b|credential|private key|ssh key|\.env|env vars?|database\b|db\b|database url|connection string|deployment|deploy config|production server|prod server|access details?|infra(?:structure)?|hostinger|ssh access)/;
 
   if (!sensitiveTarget.test(normalized)) {
     return null;

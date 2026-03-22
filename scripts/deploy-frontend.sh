@@ -58,6 +58,9 @@ aws s3 sync web/dist/ "s3://${BUCKET_NAME}" --delete --cache-control "public,max
 # Upload index.html separately with shorter cache for SPA routing
 aws s3 cp web/dist/index.html "s3://${BUCKET_NAME}/index.html" --cache-control "public,max-age=300"
 
+# Upload landing page with shorter cache
+aws s3 cp web/dist/home.html "s3://${BUCKET_NAME}/home.html" --cache-control "public,max-age=300"
+
 echo ""
 echo "Invalidating CloudFront cache..."
 aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"

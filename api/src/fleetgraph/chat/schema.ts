@@ -150,6 +150,32 @@ const ADD_COMMENT_ACTION_SCHEMA = {
   },
 } as const;
 
+const UPDATE_CONTENT_ACTION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'actionType',
+    'targetEntityType',
+    'targetEntityId',
+    'description',
+    'payload',
+  ],
+  properties: {
+    actionType: { type: 'string', enum: ['update_content'] },
+    targetEntityType: ANY_ENTITY_TYPE_SCHEMA,
+    targetEntityId: { type: 'string' },
+    description: { type: 'string' },
+    payload: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['content'],
+      properties: {
+        content: { type: 'string', description: 'Plain-text content to set as the document body. Use markdown-style formatting: paragraphs separated by blank lines, headings with # prefix, bullet lists with - prefix.' },
+      },
+    },
+  },
+} as const;
+
 export const FLEETGRAPH_CHAT_RESPONSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -169,6 +195,7 @@ export const FLEETGRAPH_CHAT_RESPONSE_SCHEMA = {
         ESCALATE_PRIORITY_ACTION_SCHEMA,
         FLAG_ISSUE_ACTION_SCHEMA,
         ADD_COMMENT_ACTION_SCHEMA,
+        UPDATE_CONTENT_ACTION_SCHEMA,
       ],
     },
     citations: {

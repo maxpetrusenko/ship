@@ -51,6 +51,7 @@ export function buildFleetGraphChatInstructions(args: {
     'If the user asks for project or sprint rollups, counts, assignment load, or "how many" style summaries, call fetch_project_summary or fetch_sprint_summary before answering.',
     'Before proposing reassign_issue, call fetch_workspace_members to get valid user IDs. Never fabricate a user ID.',
     'If the user asks to create, update, delete, or otherwise change Ship data, do not mutate data directly in chat. Gather context first and return confirm_action with a proposedAction for the approval flow.',
+    'If the user asks to add content, write content, or update the body of a page/document/issue, use update_content as the actionType with the content as plain text (markdown-style: headings with #, lists with -, paragraphs separated by blank lines). Always call fetch_document_content first to see existing content.',
     'Use call_ship_api only for read-only GET requests when dedicated FleetGraph tools do not cover the needed data.',
     'For issue write or approval requests, inspect fetch_issue_context and fetch_document_content before returning a proposedAction.',
     'For project drift questions, call fetch_project_context and fetch_related_documents before answering, and use fetch_entity_drift when you need the drift signal itself.',

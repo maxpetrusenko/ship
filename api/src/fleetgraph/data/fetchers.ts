@@ -490,6 +490,64 @@ export async function fetchParallelSignals(
 // Action executors (Phase 2A: real Ship API dispatch)
 // ---------------------------------------------------------------------------
 
+/** Convert plain text (with optional markdown-style headings/lists) to TipTap JSON. */
+function plainTextToTipTap(text: string): Record<string, unknown> {
+  const lines = text.split('\n');
+  const content: Record<string, unknown>[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+
+    // Heading: # / ## / ###
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      content.push({
+        type: 'heading',
+        attrs: { level: headingMatch[1]!.length },
+        content: [{ type: 'text', text: headingMatch[2] }],
+      });
+      i++;
+      continue;
+    }
+
+    // Bullet list: consecutive lines starting with - or *
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: Record<string, unknown>[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) {
+        const itemText = lines[i]!.replace(/^\s*[-*]\s+/, '');
+        items.push({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: itemText }] }],
+        });
+        i++;
+      }
+      content.push({ type: 'bulletList', content: items });
+      continue;
+    }
+
+    // Blank line = skip (paragraph break)
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // Default: paragraph
+    content.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: line }],
+    });
+    i++;
+  }
+
+  // Ensure at least one paragraph
+  if (content.length === 0) {
+    content.push({ type: 'paragraph', content: [{ type: 'text', text: text }] });
+  }
+
+  return { type: 'doc', content };
+}
+
 export interface ActionResult {
   success: boolean;
   message: string;
@@ -523,6 +581,11 @@ function validateActionPayload(
     case 'add_comment':
       if (!payload.content || typeof payload.content !== 'string') {
         return 'add_comment requires content string';
+      }
+      break;
+    case 'update_content':
+      if (!payload.content || typeof payload.content !== 'string') {
+        return 'update_content requires content string';
       }
       break;
     default:
@@ -614,6 +677,18 @@ export async function executeShipAction(
           throw new Error(`Target document ${targetEntityId} not found (404)`);
         }
         return { success: true, message: 'Comment added', payload };
+      }
+
+      case 'update_content': {
+        const tiptapContent = plainTextToTipTap(payload.content as string);
+        const contentResult = await client.patch(
+          `/api/documents/${encodeURIComponent(targetEntityId)}/content`,
+          { content: tiptapContent },
+        );
+        if (contentResult === null) {
+          throw new Error(`Target document ${targetEntityId} not found (404)`);
+        }
+        return { success: true, message: 'Document content updated', payload };
       }
 
       default: {

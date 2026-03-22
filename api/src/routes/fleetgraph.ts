@@ -156,10 +156,6 @@ router.use(authMiddleware);
 // -------------------------------------------------------------------------
 
 router.post('/demo/seed-flow', async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).json({ error: 'Not found' });
-  }
-
   if (!isFleetGraphReady()) {
     return res.status(503).json({ error: 'FleetGraph is not initialized' });
   }

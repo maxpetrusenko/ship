@@ -450,7 +450,6 @@ export function createFleetGraphChatDataAccess(): FleetGraphChatDataAccess {
          FROM workspace_memberships wm
          JOIN users u ON u.id = wm.user_id
          WHERE wm.workspace_id = $1
-           AND wm.archived_at IS NULL
          ORDER BY u.name`,
         [context.workspaceId],
       );
