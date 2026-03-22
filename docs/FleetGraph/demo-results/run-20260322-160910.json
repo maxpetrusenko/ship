@@ -1,0 +1,56 @@
+[
+    {
+        "part": 1,
+        "name": "Clean Path",
+        "pass": true,
+        "latency_ms": 84,
+        "branch": "clean",
+        "alerts": 0
+    },
+    {
+        "part": 2,
+        "name": "Stale Issue",
+        "pass": true,
+        "latency_ms": 5442,
+        "branch": "inform_only",
+        "signal": "stale_issue",
+        "severity": "high",
+        "trace": "https://smith.langchain.com/public/2ab5069d-0c11-4be6-906d-e3b0629675e3/r"
+    },
+    {
+        "part": 3,
+        "name": "Scope Drift",
+        "pass": true,
+        "latency_ms": 6607,
+        "assess_branch": "confirm_action",
+        "action": "review_issue",
+        "approval": "pending",
+        "trace": "https://smith.langchain.com/public/e447df74-298d-42f6-b024-5334313d0911/r"
+    },
+    {
+        "part": 4,
+        "name": "Error Fallback",
+        "pass": true,
+        "latency_ms": 49,
+        "branch": "clean"
+    },
+    {
+        "part": 5,
+        "name": "Workspace Chat",
+        "pass": true,
+        "latency_5a_ms": 5999,
+        "latency_5b_ms": 5507,
+        "thread": "10d4e46a-45e6-4451-ac67-63f3298dfcc3",
+        "trace_5a": "https://smith.langchain.com/public/9a23a558-556d-4658-a632-ec1d1190ae6a/r",
+        "trace_5b": "https://smith.langchain.com/public/7e18c534-41bd-4dd4-b4f9-bf6df0bcc8fd/r"
+    },
+    {
+        "part": 6,
+        "name": "Proactive Sweep",
+        "pass": true,
+        "alerts_before": 13,
+        "alerts_after": 13,
+        "new_alerts": 0,
+        "sweep_detected": true
+    }
+]

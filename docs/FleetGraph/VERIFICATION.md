@@ -1,4 +1,4 @@
-# FleetGraph Verification Guide
+# FleetGraph Verification Guide 
 
 How to verify that FleetGraph's graph behavior, decision paths, and deterministic/LLM boundaries work as designed. Each section maps directly to a testable claim.
 

@@ -9,7 +9,7 @@ Total time: ~12 minutes.
 ```bash
 # Ensure server is running with tracing
 export LANGCHAIN_TRACING_V2=true
-export LANGCHAIN_API_KEY=<key>
+export LANGCHAIN_API_KEY=<key> 
 pnpm dev
 ```
 
