@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ship}
+      POSTGRES_USER: ${POSTGRES_USER:-ship}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ship_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ship} -d ${POSTGRES_DB:-ship}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api.prod
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AWS_SSM_ENABLED: 0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ship}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ship}
+      SESSION_SECRET: ${SESSION_SECRET}
+      CORS_ORIGIN: https://${PUBLIC_HOST:-ship.maxpetrusenko.com}
+      APP_BASE_URL: https://${PUBLIC_HOST:-ship.maxpetrusenko.com}
+      CDN_DOMAIN: ${PUBLIC_HOST:-ship.maxpetrusenko.com}
+      DATABASE_SSL: "false"
+      S3_UPLOADS_BUCKET: ${S3_UPLOADS_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CAIA_ISSUER_URL: ${CAIA_ISSUER_URL:-}
+      CAIA_CLIENT_ID: ${CAIA_CLIENT_ID:-}
+      CAIA_CLIENT_SECRET: ${CAIA_CLIENT_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-}
+      FLEETGRAPH_API_TOKEN: ${FLEETGRAPH_API_TOKEN:-}
+      FLEETGRAPH_WORKSPACE_ID: ${FLEETGRAPH_WORKSPACE_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ship_uploads_data:/app/api/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web.prod
+      args:
+        VITE_API_URL: ""
+        VITE_APP_ENV: production
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+    volumes:
+      - ./infra/caddy/Caddyfile.coolify:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - web
+      - api
+
+volumes:
+  ship_postgres_data:
+  ship_uploads_data:

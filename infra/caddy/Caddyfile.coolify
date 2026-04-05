@@ -1,0 +1,12 @@
+{
+  auto_https off
+}
+
+{$CADDY_SITE_ADDRESS} {
+  encode zstd gzip
+
+  @api path /api/* /health /collaboration* /events*
+  reverse_proxy @api api:3000
+
+  reverse_proxy web:80
+}
