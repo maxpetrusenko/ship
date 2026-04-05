@@ -69,10 +69,25 @@ services:
     restart: unless-stopped
     expose:
       - "80"
-    environment:
-      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
-    volumes:
-      - ./infra/caddy/Caddyfile.coolify:/etc/caddy/Caddyfile:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat <<'EOF' >/etc/caddy/Caddyfile
+        {
+          auto_https off
+        }
+
+        :80 {
+          encode zstd gzip
+
+          @api path /api/* /health /collaboration* /events*
+          reverse_proxy @api api:3000
+
+          reverse_proxy web:80
+        }
+        EOF
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     depends_on:
       - web
       - api
