@@ -32,7 +32,7 @@ registry.registerComponent('securitySchemes', 'bearerAuth', {
 registry.registerComponent('securitySchemes', 'cookieAuth', {
   type: 'apiKey',
   in: 'cookie',
-  name: 'session',
+  name: 'session_id',
   description: 'Session cookie authentication. Automatically set after login.',
 });
 
@@ -52,9 +52,13 @@ Ship is a project and sprint management platform with real-time collaboration.
 
 ## Authentication
 
-All endpoints (except /auth/login and /health) require authentication via:
+Most API endpoints require authentication via:
 - **Session Cookie**: Automatically set after login (15-minute timeout, 12-hour absolute)
 - **Bearer Token**: API tokens from Settings > API Tokens
+
+Public endpoints include \`/health\`, \`/api/docs\`, \`/api/openapi.json\`,
+\`/api/openapi.yaml\`, \`/api/csrf-token\`, setup status, invite acceptance,
+public feedback, and signed webhooks.
 
 ## Core Concepts
 

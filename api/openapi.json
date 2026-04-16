@@ -3,7 +3,7 @@
   "info": {
     "title": "Ship API",
     "version": "1.0.0",
-    "description": "Ship is a project and sprint management platform with real-time collaboration.\n\n## Authentication\n\nAll endpoints (except /auth/login and /health) require authentication via:\n- **Session Cookie**: Automatically set after login (15-minute timeout, 12-hour absolute)\n- **Bearer Token**: API tokens from Settings > API Tokens\n\n## Core Concepts\n\n- **Documents**: Everything in Ship is a document (wikis, issues, projects, sprints, etc.)\n- **Document Type**: Each document has a `document_type` that determines its properties\n- **Belongs To**: Documents can be associated via `belongs_to` array (programs, projects, sprints, parent issues)\n\n## WebSocket Collaboration\n\nReal-time editing available at `/collaboration/{docType}:{docId}` using Yjs CRDT protocol.",
+    "description": "Ship is a project and sprint management platform with real-time collaboration.\n\n## Authentication\n\nMost API endpoints require authentication via:\n- **Session Cookie**: Automatically set after login (15-minute timeout, 12-hour absolute)\n- **Bearer Token**: API tokens from Settings > API Tokens\n\nPublic endpoints include `/health`, `/api/docs`, `/api/openapi.json`,\n`/api/openapi.yaml`, `/api/csrf-token`, setup status, invite acceptance,\npublic feedback, and signed webhooks.\n\n## Core Concepts\n\n- **Documents**: Everything in Ship is a document (wikis, issues, projects, sprints, etc.)\n- **Document Type**: Each document has a `document_type` that determines its properties\n- **Belongs To**: Documents can be associated via `belongs_to` array (programs, projects, sprints, parent issues)\n\n## WebSocket Collaboration\n\nReal-time editing available at `/collaboration/{docType}:{docId}` using Yjs CRDT protocol.",
     "contact": {
       "name": "Ship Team"
     }
@@ -32,7 +32,7 @@
       "cookieAuth": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "session",
+        "name": "session_id",
         "description": "Session cookie authentication. Automatically set after login."
       }
     },
@@ -3414,12 +3414,30 @@
           "name": {
             "type": "string"
           },
-          "prefix": {
+          "token_prefix": {
             "type": "string",
-            "description": "Token prefix for identification (first 8 chars)",
-            "example": "ship_abc"
+            "description": "Token prefix for identification (first 12 chars)",
+            "example": "ship_abc1234"
           },
           "last_used_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 datetime string",
+            "example": "2025-01-30T14:30:00.000Z"
+          },
+          "expires_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 datetime string",
+            "example": "2025-01-30T14:30:00.000Z"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "True when the token is not revoked and not expired"
+          },
+          "revoked_at": {
             "type": "string",
             "nullable": true,
             "format": "date-time",
@@ -3431,22 +3449,17 @@
             "format": "date-time",
             "description": "ISO 8601 datetime string",
             "example": "2025-01-30T14:30:00.000Z"
-          },
-          "expires_at": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time",
-            "description": "ISO 8601 datetime string",
-            "example": "2025-01-30T14:30:00.000Z"
           }
         },
         "required": [
           "id",
           "name",
-          "prefix",
+          "token_prefix",
           "last_used_at",
-          "created_at",
-          "expires_at"
+          "expires_at",
+          "is_active",
+          "revoked_at",
+          "created_at"
         ]
       },
       "CreateAPIToken": {
@@ -3473,18 +3486,119 @@
       "CreateAPITokenResponse": {
         "type": "object",
         "properties": {
-          "token": {
-            "$ref": "#/components/schemas/APIToken"
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID identifier",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
           },
-          "secret": {
+          "name": {
+            "type": "string"
+          },
+          "token": {
             "type": "string",
             "description": "Full token value. Only shown once at creation time.",
             "example": "ship_abc123xyz789..."
+          },
+          "token_prefix": {
+            "type": "string",
+            "description": "Token prefix for identification (first 12 chars)",
+            "example": "ship_abc1234"
+          },
+          "expires_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 datetime string",
+            "example": "2025-01-30T14:30:00.000Z"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 datetime string",
+            "example": "2025-01-30T14:30:00.000Z"
+          },
+          "warning": {
+            "type": "string",
+            "example": "Save this token now. It will not be shown again."
           }
         },
         "required": [
+          "id",
+          "name",
           "token",
-          "secret"
+          "token_prefix",
+          "expires_at",
+          "created_at",
+          "warning"
+        ]
+      },
+      "APITokenListResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/APIToken"
+            }
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ]
+      },
+      "CreateAPITokenRouteResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/CreateAPITokenResponse"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ]
+      },
+      "RevokeAPITokenResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string",
+                "enum": [
+                  "API token revoked"
+                ]
+              }
+            },
+            "required": [
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "data"
         ]
       },
       "Backlink": {
@@ -9983,10 +10097,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/APIToken"
-                  }
+                  "$ref": "#/components/schemas/APITokenListResponse"
                 }
               }
             }
@@ -10014,7 +10125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateAPITokenResponse"
+                  "$ref": "#/components/schemas/CreateAPITokenRouteResponse"
                 }
               }
             }
@@ -10045,8 +10156,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Token deleted"
+          "200": {
+            "description": "Token revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAPITokenResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Token not found"

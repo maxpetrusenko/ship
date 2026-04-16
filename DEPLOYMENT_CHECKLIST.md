@@ -42,10 +42,24 @@ Quick reference for deploying Ship to AWS.
 After deployment, verify:
 
 - [ ] API health check: `curl https://api.example.gov/health`
+- [ ] API docs load: `curl https://api.example.gov/api/openapi.json`
 - [ ] Frontend loads: Open `https://app.example.gov` in browser
 - [ ] WebSocket works: Create a new document and test real-time collaboration
 - [ ] Database connected: Check API logs for database connection messages
 - [ ] CORS configured: Frontend can call API endpoints
+
+## Coolify Bootstrap
+
+The Coolify API container runs migrations on startup, but it does not seed demo
+data automatically. Run the seed once after first deploy:
+
+```bash
+ssh -i ~/.ssh/contabo_vmi3203669_ed25519 max@173.249.52.27
+sudo docker exec <ship-api-container> sh -lc 'cd /app/api && node dist/db/seed.js'
+```
+
+The seed is idempotent. It creates the demo workspace, users, project data, and
+the `dev@ship.local` admin account.
 
 ## Common Tasks
 

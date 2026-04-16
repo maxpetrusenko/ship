@@ -6,9 +6,13 @@ info:
 
 ## Authentication
 
-All endpoints (except /auth/login and /health) require authentication via:
+Most API endpoints require authentication via:
 - **Session Cookie**: Automatically set after login (15-minute timeout, 12-hour absolute)
 - **Bearer Token**: API tokens from Settings > API Tokens
+
+Public endpoints include `/health`, `/api/docs`, `/api/openapi.json`,
+`/api/openapi.yaml`, `/api/csrf-token`, setup status, invite acceptance,
+public feedback, and signed webhooks.
 
 ## Core Concepts
 
@@ -38,7 +42,7 @@ components:
     cookieAuth:
       type: apiKey
       in: cookie
-      name: session
+      name: session_id
       description: Session cookie authentication. Automatically set after login.
   schemas:
     ErrorResponse:
@@ -2643,11 +2647,26 @@ components:
           example: 550e8400-e29b-41d4-a716-446655440000
         name:
           type: string
-        prefix:
+        token_prefix:
           type: string
-          description: Token prefix for identification (first 8 chars)
-          example: ship_abc
+          description: Token prefix for identification (first 12 chars)
+          example: ship_abc1234
         last_used_at:
+          type: string
+          nullable: true
+          format: date-time
+          description: ISO 8601 datetime string
+          example: "2025-01-30T14:30:00.000Z"
+        expires_at:
+          type: string
+          nullable: true
+          format: date-time
+          description: ISO 8601 datetime string
+          example: "2025-01-30T14:30:00.000Z"
+        is_active:
+          type: boolean
+          description: True when the token is not revoked and not expired
+        revoked_at:
           type: string
           nullable: true
           format: date-time
@@ -2658,19 +2677,15 @@ components:
           format: date-time
           description: ISO 8601 datetime string
           example: "2025-01-30T14:30:00.000Z"
-        expires_at:
-          type: string
-          nullable: true
-          format: date-time
-          description: ISO 8601 datetime string
-          example: "2025-01-30T14:30:00.000Z"
       required:
         - id
         - name
-        - prefix
+        - token_prefix
         - last_used_at
-        - created_at
         - expires_at
+        - is_active
+        - revoked_at
+        - created_at
     CreateAPIToken:
       type: object
       properties:
@@ -2690,15 +2705,88 @@ components:
     CreateAPITokenResponse:
       type: object
       properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID identifier
+          example: 550e8400-e29b-41d4-a716-446655440000
+        name:
+          type: string
         token:
-          $ref: "#/components/schemas/APIToken"
-        secret:
           type: string
           description: Full token value. Only shown once at creation time.
           example: ship_abc123xyz789...
+        token_prefix:
+          type: string
+          description: Token prefix for identification (first 12 chars)
+          example: ship_abc1234
+        expires_at:
+          type: string
+          nullable: true
+          format: date-time
+          description: ISO 8601 datetime string
+          example: "2025-01-30T14:30:00.000Z"
+        created_at:
+          type: string
+          format: date-time
+          description: ISO 8601 datetime string
+          example: "2025-01-30T14:30:00.000Z"
+        warning:
+          type: string
+          example: Save this token now. It will not be shown again.
       required:
+        - id
+        - name
         - token
-        - secret
+        - token_prefix
+        - expires_at
+        - created_at
+        - warning
+    APITokenListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+            - true
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIToken"
+      required:
+        - success
+        - data
+    CreateAPITokenRouteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+            - true
+        data:
+          $ref: "#/components/schemas/CreateAPITokenResponse"
+      required:
+        - success
+        - data
+    RevokeAPITokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+            - true
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+              enum:
+                - API token revoked
+          required:
+            - message
+      required:
+        - success
+        - data
     Backlink:
       type: object
       properties:
@@ -7177,9 +7265,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/APIToken"
+                $ref: "#/components/schemas/APITokenListResponse"
     post:
       tags:
         - API Tokens
@@ -7196,7 +7282,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreateAPITokenResponse"
+                $ref: "#/components/schemas/CreateAPITokenRouteResponse"
         400:
           description: Validation error
   /api-tokens/{id}:
@@ -7214,8 +7300,12 @@ paths:
                     name: id
                     in: path
       responses:
-        204:
-          description: Token deleted
+        200:
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeAPITokenResponse"
         404:
           description: Token not found
   /documents/{id}/backlinks:

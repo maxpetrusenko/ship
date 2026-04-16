@@ -37,6 +37,7 @@ import weeklyPlansRoutes, { weeklyRetrosRouter } from './routes/weekly-plans.js'
 import { documentCommentsRouter, commentsRouter } from './routes/comments.js';
 import { setupSwagger } from './swagger.js';
 import { initializeCAIA } from './services/caia.js';
+import { ERROR_CODES, HTTP_STATUS } from '@ship/shared';
 
 // Validate SESSION_SECRET in production
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -98,17 +99,29 @@ const apiLimiter = rateLimit({
 export function createApp(corsOrigin: string = 'http://localhost:5173'): express.Express {
   const app = express();
 
-  // Trust proxy headers (CloudFront) for secure cookies and correct protocol detection
+  // Trust proxy headers for secure cookies and correct protocol detection.
+  // Production is normally behind CloudFront or Coolify/Traefik/Caddy.
   if (process.env.NODE_ENV === 'production') {
-    app.set('trust proxy', 1);
+    app.set('trust proxy', true);
 
-    // CloudFront with viewer_protocol_policy="redirect-to-https" always serves viewers over HTTPS.
-    // However, CloudFront -> EB uses HTTP (origin_protocol_policy="http-only"), so CloudFront
-    // sets X-Forwarded-Proto to "http". Override it to "https" when request comes via CloudFront.
+    const httpsHosts = new Set(
+      [
+        process.env.PUBLIC_HOST,
+        process.env.APP_BASE_URL ? new URL(process.env.APP_BASE_URL).host : undefined,
+      ].filter((host): host is string => Boolean(host)),
+    );
+
     app.use((req, _res, next) => {
-      // CloudFront adds Via header like "2.0 <id>.cloudfront.net (CloudFront)"
       const viaHeader = req.headers['via'] as string;
-      if (viaHeader && viaHeader.includes('cloudfront')) {
+      const forwardedHostHeader = req.headers['x-forwarded-host'];
+      const forwardedHost = Array.isArray(forwardedHostHeader)
+        ? forwardedHostHeader[0]
+        : forwardedHostHeader;
+      const requestHost = forwardedHost || req.headers.host;
+      const cameThroughCloudFront = viaHeader && viaHeader.includes('cloudfront');
+      const matchesHttpsPublicHost = requestHost && httpsHosts.has(requestHost);
+
+      if (cameThroughCloudFront || matchesHttpsPublicHost) {
         req.headers['x-forwarded-proto'] = 'https';
       }
       next();
@@ -172,7 +185,21 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // CSRF token endpoint (must be before CSRF protection middleware)
   app.get('/api/csrf-token', (req, res) => {
-    res.json({ token: generateToken(req) });
+    const token = generateToken(req);
+    req.session.save((err) => {
+      if (err) {
+        console.error('Failed to save CSRF session:', err);
+        res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+          success: false,
+          error: {
+            code: ERROR_CODES.INTERNAL_ERROR,
+            message: 'Failed to create CSRF token',
+          },
+        });
+        return;
+      }
+      res.json({ token });
+    });
   });
 
   // Health check (no CSRF needed)
@@ -255,6 +282,21 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   // Comments routes
   app.use('/api/documents', conditionalCsrf, documentCommentsRouter);
   app.use('/api/comments', conditionalCsrf, commentsRouter);
+
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    const maybeCsrfError = err as { code?: string; statusCode?: number; message?: string };
+    if (maybeCsrfError.code === 'EBADCSRFTOKEN') {
+      res.status(maybeCsrfError.statusCode || HTTP_STATUS.FORBIDDEN).json({
+        success: false,
+        error: {
+          code: 'CSRF_ERROR',
+          message: 'Invalid CSRF token',
+        },
+      });
+      return;
+    }
+    next(err);
+  });
 
   // Initialize CAIA OAuth client at startup
   initializeCAIA().catch((err) => {

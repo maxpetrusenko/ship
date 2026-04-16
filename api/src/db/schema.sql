@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL,         -- User-provided name (e.g., "Claude Code")
   token_hash TEXT NOT NULL,   -- SHA-256 hash (never store plain token)
-  token_prefix TEXT NOT NULL, -- First 8 chars for identification
+  token_prefix TEXT NOT NULL, -- First 12 chars for identification
   last_used_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ,     -- NULL = never expires
   revoked_at TIMESTAMPTZ,     -- NULL = active, timestamp = revoked

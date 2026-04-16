@@ -14,7 +14,7 @@ function generateApiToken(): { token: string; hash: string; prefix: string } {
   const randomBytes = crypto.randomBytes(32).toString('hex');
   const token = `ship_${randomBytes}`;
   const hash = crypto.createHash('sha256').update(token).digest('hex');
-  const prefix = token.substring(0, 12); // "ship_" + first 7 chars
+  const prefix = token.substring(0, 12); // "ship_" + first 7 chars (12 chars total)
   return { token, hash, prefix };
 }
 

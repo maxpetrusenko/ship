@@ -153,6 +153,9 @@ Log in with the demo account:
 | OpenAPI spec | http://localhost:3000/api/openapi.json | OpenAPI 3.0 specification |
 | PostgreSQL | localhost:5432 | Database (via Docker) |
 
+External API examples and API token setup are documented in
+[`docs/external-api.md`](docs/external-api.md).
+
 ### Common Commands
 
 ```bash

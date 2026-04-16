@@ -62,13 +62,17 @@ registry.register('SessionResponse', SessionResponseSchema);
 export const APITokenSchema = z.object({
   id: UuidSchema,
   name: z.string(),
-  prefix: z.string().openapi({
-    description: 'Token prefix for identification (first 8 chars)',
-    example: 'ship_abc',
+  token_prefix: z.string().openapi({
+    description: 'Token prefix for identification (first 12 chars)',
+    example: 'ship_abc1234',
   }),
   last_used_at: DateTimeSchema.nullable(),
-  created_at: DateTimeSchema,
   expires_at: DateTimeSchema.nullable(),
+  is_active: z.boolean().openapi({
+    description: 'True when the token is not revoked and not expired',
+  }),
+  revoked_at: DateTimeSchema.nullable(),
+  created_at: DateTimeSchema,
 }).openapi('APIToken');
 
 registry.register('APIToken', APITokenSchema);
@@ -86,14 +90,47 @@ export const CreateAPITokenSchema = z.object({
 registry.register('CreateAPIToken', CreateAPITokenSchema);
 
 export const CreateAPITokenResponseSchema = z.object({
-  token: APITokenSchema,
-  secret: z.string().openapi({
+  id: UuidSchema,
+  name: z.string(),
+  token: z.string().openapi({
     description: 'Full token value. Only shown once at creation time.',
     example: 'ship_abc123xyz789...',
+  }),
+  token_prefix: z.string().openapi({
+    description: 'Token prefix for identification (first 12 chars)',
+    example: 'ship_abc1234',
+  }),
+  expires_at: DateTimeSchema.nullable(),
+  created_at: DateTimeSchema,
+  warning: z.string().openapi({
+    example: 'Save this token now. It will not be shown again.',
   }),
 }).openapi('CreateAPITokenResponse');
 
 registry.register('CreateAPITokenResponse', CreateAPITokenResponseSchema);
+
+const APITokenListResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(APITokenSchema),
+}).openapi('APITokenListResponse');
+
+registry.register('APITokenListResponse', APITokenListResponseSchema);
+
+const CreateAPITokenRouteResponseSchema = z.object({
+  success: z.literal(true),
+  data: CreateAPITokenResponseSchema,
+}).openapi('CreateAPITokenRouteResponse');
+
+registry.register('CreateAPITokenRouteResponse', CreateAPITokenRouteResponseSchema);
+
+const RevokeAPITokenResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    message: z.literal('API token revoked'),
+  }),
+}).openapi('RevokeAPITokenResponse');
+
+registry.register('RevokeAPITokenResponse', RevokeAPITokenResponseSchema);
 
 // ============== Register Auth Endpoints ==============
 
@@ -183,7 +220,7 @@ registry.registerPath({
       description: 'List of API tokens',
       content: {
         'application/json': {
-          schema: z.array(APITokenSchema),
+          schema: APITokenListResponseSchema,
         },
       },
     },
@@ -210,7 +247,7 @@ registry.registerPath({
       description: 'Created API token',
       content: {
         'application/json': {
-          schema: CreateAPITokenResponseSchema,
+          schema: CreateAPITokenRouteResponseSchema,
         },
       },
     },
@@ -231,8 +268,13 @@ registry.registerPath({
     }),
   },
   responses: {
-    204: {
-      description: 'Token deleted',
+    200: {
+      description: 'Token revoked',
+      content: {
+        'application/json': {
+          schema: RevokeAPITokenResponseSchema,
+        },
+      },
     },
     404: {
       description: 'Token not found',

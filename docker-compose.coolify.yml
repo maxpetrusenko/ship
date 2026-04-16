@@ -82,7 +82,11 @@ services:
           encode zstd gzip
 
           @api path /api/* /health /collaboration* /events*
-          reverse_proxy @api api:3000
+          reverse_proxy @api api:3000 {
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Port 443
+            header_up X-Forwarded-Host {host}
+          }
 
           reverse_proxy web:80
         }
